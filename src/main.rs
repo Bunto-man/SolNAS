@@ -6,7 +6,7 @@ use std::{
     env,
     fs,
     net::{SocketAddr, UdpSocket},
-    path::PathBuf,
+    path::{Path,PathBuf,Component},
     io::{self, Write},
     time::{Instant,SystemTime,UNIX_EPOCH},
     
@@ -24,7 +24,7 @@ use dotenvy;
 use tokio_util::io::ReaderStream; 
 use axum::{
     body::Body,
-    extract::{Multipart, Path,Request},
+    extract::{DefaultBodyLimit,Multipart, Path as AxumPath,Request,Query,RawQuery},
     http::{header, HeaderMap, StatusCode,HeaderValue},
     middleware::Next,
     middleware,
@@ -36,17 +36,22 @@ use axum::{
 };//axum
 use serde_json::{Value, json};
 use tower_http::services::{ServeDir, ServeFile};
-use serde::Serialize;
-
-use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey};
-
+use serde::{Serialize,Deserialize};
+use jsonwebtoken::{
+    encode, 
+    decode, 
+    Header, 
+    Validation, 
+    EncodingKey, 
+    DecodingKey
+};
 use rand::{
     thread_rng,
     Rng,
     distributions::Alphanumeric
 };
 
-
+//-----------------------------------------------------------------------------------------------
 pub struct AppConfig {
     pub max_upload_size: u64,
     pub upload_speed_bps: u64,   // 0 means unlimited
@@ -58,6 +63,36 @@ struct Claims {
     sub: String, // Subject (who this is - e.g., "admin")
     exp: usize,  // Expiration time (when this token dies)
 }
+
+#[derive(Deserialize)]
+struct ListQuery {
+    path: Option<String>,
+}
+
+#[derive(Serialize)]
+struct FileInfo {
+    name: String,
+    size: u64,
+    is_dir: bool,
+}
+
+#[derive(Deserialize)]
+struct FolderRequest {
+    path: String, // e.g., "Photos/Vacation/Hawaii"
+}
+
+#[derive(Deserialize)]
+struct MoveRequest {
+    source_path: String,      // e.g., "Downloads/movie.mp4"
+    destination_path: String, // e.g., "Movies/movie.mp4"
+}
+
+///this is a struct for the password.
+#[derive(Deserialize)]
+struct LoginForm { password: String }
+
+
+//-------------------------------------------------------------------------------------------------------
 
 //this generates a random 32 bit string for the secret key, saved into memory.
 static JWT_SECRET: Lazy<String> = Lazy::new(|| {
@@ -94,7 +129,7 @@ static CONFIG: Lazy<AppConfig> = Lazy::new(|| {
         writeln!(file, "# Set max upload/download speed in bytes per second (0 = unlimited), 1024*1024 = 1MB Default").unwrap();
         writeln!(file, "file_Size= 1024*1024*1024").unwrap();
         writeln!(file, "upload_speed= 1024*1024").unwrap();
-        writeln!(file, "download_speed= 1024*1024").unwrap();
+        
         
         return current_config;
     }
@@ -249,8 +284,6 @@ fn ensure_password() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 
-
-use serde::Deserialize;
 ///Grabs the local IP to bind the socket
 /// 
 /// * `sock` - the IP address of the computer
@@ -298,11 +331,15 @@ async fn main() {
    let api_routes = Router::new()
         .route("/files", get(api_list_files))
         .route("/upload", post(api_upload))
-        .route("/download/{name}", get(api_download))
+        .route("/download/{*path}", get(api_download))
+        .route("/folders", post(api_create_folder))
+        .route("/move", post(api_move))
 
         .route_layer(middleware::from_fn(api_require_auth)) // The protected routes are protected by authentication
 
-        .route("/auth", post(api_login));
+        .route("/auth", post(api_login))
+
+        .layer(DefaultBodyLimit::max(CONFIG.max_upload_size as usize));
 
     let serve_ui = ServeDir::new("web_ui")
         .fallback(ServeFile::new("web_ui/index.html"));
@@ -375,15 +412,10 @@ static APP_PASSWORD: Lazy<String> = Lazy::new(|| {
 });
 
 
-///this is a struct for the password.
-#[derive(Deserialize)]
-struct LoginForm { password: String }
+
 
 // Notice we use Json<LoginForm> instead of Form<LoginForm>. 
 // The client will send a JSON body: {"password": "mypassword"}
-
-
-
 async fn api_login(Json(data): Json<LoginForm>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     if data.password == *APP_PASSWORD {
         println!("Successful API login generated on {}", get_time());
@@ -474,6 +506,26 @@ async fn api_require_auth(
     }
 }
 
+// Safely combines the base storage directory with a user-provided path.
+/// It strips out any attempts to navigate UP the directory tree (like "..").
+fn resolve_safe_path(user_path: &str) -> Result<PathBuf, String> {
+    let base_dir = PathBuf::from("FileStorage");
+    let mut final_path = base_dir.clone();
+
+    // Iterate through every piece of the path the user sent
+    for component in Path::new(user_path).components() {
+        match component {
+            // If it's a normal folder/file name, add it to our path
+            Component::Normal(name) => final_path.push(name),
+            // If they try to go up a directory (..), or use root (/), reject it!
+            _ => return Err("Invalid or malicious path detected.".to_string()),
+        }
+    }
+
+    Ok(final_path)
+}
+
+
 
 ///handles FileStorage from server to device
 /// 
@@ -493,13 +545,13 @@ async fn api_upload(headers: HeaderMap, mut multipart: Multipart) -> impl IntoRe
 
         if total_request_size > CONFIG.max_upload_size {
                     println!("file too large.");
-                    return (
-                        StatusCode::PAYLOAD_TOO_LARGE,
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
             Json(json!({
                 "status": "error", 
                 "message": "File exceeds maximum allowed upload size."
             })),
-                            ).into_response();
+        ).into_response();
         }
 
                 let mut global_written : u64 = 0; //this is to keep everything normal
@@ -511,32 +563,40 @@ async fn api_upload(headers: HeaderMap, mut multipart: Multipart) -> impl IntoRe
     while let Some(mut field) = multipart.next_field().await.unwrap() {
         if let Some(filename) = field.file_name().map(|s| s.to_string()) {
 
-            let file_name= field.file_name().map(|s| s.to_string());
-            let name_of_file = file_name.unwrap();
-            //block bad names and security flaws.
+            //add the new stuff in
+            //safe path variable
+            let full_path = match resolve_safe_path(&filename) {
+                Ok(path) => path,
+                Err(e) => {
+                    println!("WARNING: Malicious or invalid path blocked: {}", filename);
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"status": "error", "message": e}))
+                    ).into_response();
+                }
+            };
+            //parent directory creator
+            if let Some(parent_dir) = full_path.parent() {
+                if let Err(e) = tokio::fs::create_dir_all(parent_dir).await {
+                    println!("ERROR: Failed to create directories for '{}': {}", filename, e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"status": "error", "message": "Server error creating parent folders."}))
+                    ).into_response();
+                }
+            }
+            //finally, create the file with the full path and set it in.
+            let file = match tokio::fs::File::create(&full_path).await {
+                Ok(f) => f,
+                Err(e) => {
+                    println!("ERROR: Failed to create file '{}': {}", filename, e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"status": "error", "message": "Server error creating file."}))
+                    ).into_response();
+                }
+            };
 
-            if name_of_file.contains('/') || name_of_file.contains('\\') || name_of_file.contains("..") {
-            println!("WARNING: Malicious path traversal attempt blocked: {}", name_of_file);
-
-            return (
-                StatusCode::BAD_REQUEST, 
-                    Json(json!({"status": "error", "message": "Invalid filename detected."}))
-                ).into_response();
-    }
-    
-            let path = PathBuf::from("FileStorage").join(&filename);
-
-            // API CHANGE: Safely handle file creation errors instead of unwrapping
-                let file = match File::create(&path).await {
-                    Ok(f) => f,
-                    Err(e) => {
-                        println!("ERROR: Failed to create file '{}': {}", filename, e);
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({"status": "error", "message": "Server error creating file."}))
-                        ).into_response();
-                    }
-                };
            
             let chunk_size = 128*1024; //128KB Keep it static to use less data
             let mut buf_writer = BufWriter::with_capacity(chunk_size, file);
@@ -581,7 +641,7 @@ async fn api_upload(headers: HeaderMap, mut multipart: Multipart) -> impl IntoRe
 
 
                 if last_print.elapsed().as_millis()>200{
-                    print!("\rUploading '{}' || {:.2} Megabytes Written  {:.2}%",name_of_file,write_size,percentage);
+                    print!("\rUploading '{}' || {:.2} Megabytes Written  {:.2}%",filename,write_size,percentage);
                     
                     std::io::stdout().flush().unwrap();
                     last_print=Instant::now();
@@ -593,7 +653,7 @@ async fn api_upload(headers: HeaderMap, mut multipart: Multipart) -> impl IntoRe
             buf_writer.flush().await.unwrap();
             
             //added some pretty diagnostic stuff.
-            println!("\n   ⬆️ Uploaded '{}' to the dashboard on {}",name_of_file,get_time());
+            println!("\n   ⬆️ Uploaded '{}' to the dashboard on {}",filename,get_time());
             uploaded_files.push(filename);
         }
     }
@@ -608,23 +668,36 @@ async fn api_upload(headers: HeaderMap, mut multipart: Multipart) -> impl IntoRe
 }
 
 
-///list the files
-/// 
-/// * `names` - the string of the names of the files in the upload folder.
-    #[derive(Serialize)]
-    struct FileInfo {
-        name: String,
-        size: u64,
+
+async fn api_list_files(Query(query): Query<ListQuery>) -> Response {
+    
+    // 1. Get the requested path, or default to the root if they didn't provide one
+    let target_subpath = query.path.unwrap_or_else(|| "".to_string());
+
+    // 2. Sanitize it using the helper we built earlier
+    let safe_path = match resolve_safe_path(&target_subpath) {
+        Ok(path) => path,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"status": "error", "message": e}))
+            ).into_response();
+        }
+    };
+
+    // 3. Ensure the requested folder actually exists
+    if !safe_path.exists() || !safe_path.is_dir() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"status": "error", "message": "Directory not found."}))
+        ).into_response();
     }
 
-async fn api_list_files() -> Response {
-    
-    // We explicitly type 'entries' and use the fully qualified 'tokio::fs' path 
-    // to guarantee it doesn't clash with standard std::fs.
-    let mut entries: tokio::fs::ReadDir = match tokio::fs::read_dir("FileStorage").await {
+    // 4. Read the target directory (not just the root FileStorage)
+    let mut entries: tokio::fs::ReadDir = match tokio::fs::read_dir(&safe_path).await {
         Ok(dir) => dir,
         Err(e) => {
-            println!("ERROR: Failed to read FileStorage directory: {}", e);
+            println!("ERROR: Failed to read directory '{:?}': {}", safe_path, e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"status": "error", "message": "Failed to read storage directory."}))
@@ -634,16 +707,22 @@ async fn api_list_files() -> Response {
 
     let mut files = Vec::new();
 
-    // Asynchronously iterate over the directory entries
+    // 5. Asynchronously iterate over the directory entries
     while let Ok(Some(entry)) = entries.next_entry().await {
         if let Ok(metadata) = entry.metadata().await {
-            if metadata.is_file() {
-                if let Some(name) = entry.file_name().to_str() {
-                    files.push(FileInfo {
-                        name: name.to_string(),
-                        size: metadata.len(),
-                    });
-                }
+            if let Some(name) = entry.file_name().to_str() {
+                
+                let is_directory = metadata.is_dir();
+                
+                // Folders don't have a reliable "size" without deep-scanning them, 
+                // so we just report 0 for folders to save server processing power.
+                let size = if is_directory { 0 } else { metadata.len() };
+
+                files.push(FileInfo {
+                    name: name.to_string(),
+                    size,
+                    is_dir: is_directory,
+                });
             }
         }
     }
@@ -653,6 +732,8 @@ async fn api_list_files() -> Response {
         StatusCode::OK,
         Json(json!({
             "status": "success",
+            // We can return the current path so the UI knows where it is!
+            "current_path": target_subpath, 
             "files": files
         }))
     ).into_response()
@@ -662,21 +743,26 @@ async fn api_list_files() -> Response {
 /// 
 /// * `name` - the name of the file as defined by the names section.
 /// * `response` - Hopefully resolves successfully.
-async fn api_download(Path(name): Path<String>) -> impl IntoResponse {
+async fn api_download(
+    AxumPath(path): AxumPath<String>,
+    RawQuery(query): RawQuery
+) -> impl IntoResponse {
 
-    //block a bad name
-    if name.contains('/') || name.contains('\\') || name.contains("..") {
-        println!("WARNING: Malicious path traversal attempt blocked: {}", name);
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"status": "error", "message": "Invalid filename detected."}))
-        ).into_response();
-    }
+    // 1. Sanitize the path (Allows folders, but blocks malicious "../" attacks)
+    let full_path = match resolve_safe_path(&path) {
+        Ok(p) => p,
+        Err(e) => {
+            println!("WARNING: Malicious path traversal attempt blocked: {}", path);
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"status": "error", "message": e}))
+            ).into_response();
+        }
+    };
 
-    let path = PathBuf::from("FileStorage").join(&name);
 
     //the file must exist.
-    if !path.exists() {
+    if !full_path.exists() {
         println!("ERROR! Path does not exist!\n");
         return (
             StatusCode::NOT_FOUND,
@@ -684,19 +770,27 @@ async fn api_download(Path(name): Path<String>) -> impl IntoResponse {
         ).into_response();
     }
 
+    // 3. Ensure it's actually a file, not a directory!
+    if full_path.is_dir() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"status": "error", "message": "Cannot download a directory as a file."}))
+        ).into_response();
+    }
+
     //the file must be accessible.
-    let file = match File::open(&path).await {
+    let file = match File::open(&full_path).await {
         Ok(f) => f,
         Err(e) => match e.kind() {
             std::io::ErrorKind::NotFound => {
-                println!("Download failed: File '{}' not found.", name);
+                println!("Download failed: File '{}' not found.", path);
                 return (
                     StatusCode::NOT_FOUND,
                     Json(json!({"status": "error", "message": "File not found."}))
                 ).into_response();
             }
             _ => {
-                println!("Download failed: File '{}' inaccessible. Error: {}", name, e);
+                println!("Download failed: File '{}' inaccessible. Error: {}", path, e);
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({"status": "error", "message": "Server error opening file."}))
@@ -733,15 +827,93 @@ async fn api_download(Path(name): Path<String>) -> impl IntoResponse {
         HeaderValue::from_str(mime.as_ref()).unwrap_or(HeaderValue::from_static("application/octet-stream")),
     );
 
-    let disposition = format!("attachment; filename=\"{}\"", name);
+    // 4. Extract JUST the filename for the browser's save prompt
+    let actual_filename = full_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("downloaded_file");
+
+    let disposition = format!("attachment; filename=\"{}\"", actual_filename);
     if let Ok(header_value) = HeaderValue::from_str(&disposition) {
         headers.insert(header::CONTENT_DISPOSITION, header_value);
     }
-
-    headers.insert(header::CONTENT_LENGTH, HeaderValue::from(file_size)); //give a file size to the browser so that it can use its own time evaluation.
-
     //give the terminal some feedback for downloads
-    println!("⬇️ User downloaded '{}' from the dashboard on {}",name,get_time());
+    headers.insert(header::CONTENT_LENGTH, HeaderValue::from(file_size)); //give a file size to the browser so that it can use its own time evaluation.
+    let is_preview = query.as_deref().unwrap_or("").contains("preview=true");
+    
+    if !is_preview{
+        println!("⬇️ User downloaded '{}' from the dashboard on {}",path,get_time());
+    }
     (headers, body).into_response()
     
+}
+
+//define API tools here for use with the client app
+
+async fn api_create_folder(Json(payload): Json<FolderRequest>) -> impl IntoResponse {
+    // 1. Sanitize the requested path
+    let target_path = match resolve_safe_path(&payload.path) {
+        Ok(path) => path,
+        Err(e) => return (
+            StatusCode::BAD_REQUEST, 
+            Json(json!({"status": "error", "message": e}))
+        ).into_response(),
+    };
+
+    // 2. Use Tokio to create the directory (and any parent directories if needed)
+    match tokio::fs::create_dir_all(&target_path).await {
+        Ok(_) => {
+            println!("📁 Created new folder: {}", payload.path);
+            (
+                StatusCode::OK,
+                Json(json!({"status": "success", "message": "Folder created"}))
+            ).into_response()
+        }
+        Err(e) => {
+            println!("ERROR: Failed to create folder '{}': {}", payload.path, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"status": "error", "message": "Could not create folder"}))
+            ).into_response()
+        }
+    }
+}
+
+async fn api_move(Json(payload): Json<MoveRequest>) -> impl IntoResponse {
+    // 1. Sanitize BOTH paths
+    let safe_source = match resolve_safe_path(&payload.source_path) {
+        Ok(path) => path,
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({"status": "error", "message": e}))).into_response(),
+    };
+    
+    let safe_dest = match resolve_safe_path(&payload.destination_path) {
+        Ok(path) => path,
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({"status": "error", "message": e}))).into_response(),
+    };
+
+    // 2. Ensure the source actually exists before moving
+    if !safe_source.exists() {
+        return (
+            StatusCode::NOT_FOUND, 
+            Json(json!({"status": "error", "message": "Source file or folder not found"}))
+        ).into_response();
+    }
+
+    // 3. Move/Rename the file asynchronously
+    match tokio::fs::rename(&safe_source, &safe_dest).await {
+        Ok(_) => {
+            println!("🔄 Moved '{}' -> '{}'", payload.source_path, payload.destination_path);
+            (
+                StatusCode::OK,
+                Json(json!({"status": "success", "message": "Moved successfully"}))
+            ).into_response()
+        }
+        Err(e) => {
+            println!("ERROR: Failed to move file: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"status": "error", "message": "Failed to move file. Ensure target folder exists."}))
+            ).into_response()
+        }
+    }
 }
