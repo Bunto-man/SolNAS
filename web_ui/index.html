@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SolNAS</title>
+    <style>
+        :root {
+            --primary: #007bff;
+            --bg: #f4f7f6;
+            --card-bg: #ffffff;
+            --text: #333;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        /* Hide elements dynamically */
+        .hidden { display: none !important; }
+        
+        /* Forms and Buttons */
+        input[type="password"], input[type="file"] {
+            width: 100%;
+            padding: 12px;
+            margin: 10px 0;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            width: 100%;
+            font-size: 16px;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+        button:hover { background-color: #0056b3; }
+
+        /* File List Layout */
+        .file-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 15px;
+        }
+        .file-card {
+            background: var(--card-bg);
+            padding: 15px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            text-align: center;
+            word-break: break-all;
+        }
+        .file-card img {
+            max-width: 100%;
+            height: 100px;
+            object-fit: cover;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+        .file-size {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+        .download-btn {
+            background-color: #28a745;
+            margin-top: 10px;
+            padding: 8px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div id="login-screen">
+        <h2>NAS Login</h2>
+        <input type="password" id="password" placeholder="Enter Password">
+        <button onclick="login()">Access Files</button>
+        <p id="login-error" style="color: red;"></p>
+    </div>
+
+    <div id="dashboard-screen" class="hidden">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h2>My Files</h2>
+            <button onclick="logout()" style="width: auto; background-color: #dc3545;">Logout</button>
+        </div>
+
+        <div style="background: white; padding: 15px; border-radius: 12px; margin-bottom: 20px;">
+            <h3>Upload Files</h3>
+            <input type="file" id="file-input" multiple>
+            <button onclick="uploadFiles()">Upload</button>
+            <p id="upload-status"></p>
+        </div>
+
+        <div class="file-grid" id="file-list">
+            </div>
+    </div>
+</div>
+
+<script>
+    // --- State Management ---
+    let token = localStorage.getItem('nas_token');
+
+    // On page load, check if we are already logged in
+    if (token) {
+        showDashboard();
+    }
+
+    // --- Format Bytes helper ---
+    function formatBytes(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024, sizes = ['Bytes', 'KB', 'MB', 'GB'], i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    // --- Authentication ---
+    async function login() {
+        const password = document.getElementById('password').value;
+        try {
+            const res = await fetch('/api/auth', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password })
+            });
+            const data = await res.json();
+
+            if (res.ok) {
+                token = data.token;
+                localStorage.setItem('nas_token', token);
+                showDashboard();
+            } else {
+                document.getElementById('login-error').innerText = data.message;
+            }
+        } catch (e) {
+            document.getElementById('login-error').innerText = "Network error connecting to NAS.";
+        }
+    }
+
+    function logout() {
+        localStorage.removeItem('nas_token');
+        token = null;
+        document.getElementById('dashboard-screen').classList.add('hidden');
+        document.getElementById('login-screen').classList.remove('hidden');
+    }
+
+    function showDashboard() {
+        document.getElementById('login-screen').classList.add('hidden');
+        document.getElementById('dashboard-screen').classList.remove('hidden');
+        loadFiles();
+    }
+
+    // --- File Management ---
+    async function loadFiles() {
+        const fileList = document.getElementById('file-list');
+        fileList.innerHTML = '<p>Loading files...</p>';
+
+        try {
+            const res = await fetch('/api/files', {
+                headers: { 'Authorization': 'Bearer ' + token }
+            });
+            
+            if (res.status === 401) return logout(); // Token expired
+            
+            const data = await res.json();
+            fileList.innerHTML = '';
+
+            data.files.forEach(file => {
+                const isImage = file.name.match(/\.(jpg|jpeg|png|gif)$/i);
+                
+                const card = document.createElement('div');
+                card.className = 'file-card';
+                card.innerHTML = `
+                    ${isImage ? `<img id="preview-${file.name}" src="" alt="loading..."/>` : '📄'}
+                    <div style="font-weight: bold;">${file.name}</div>
+                    <div class="file-size">${formatBytes(file.size)}</div>
+                    <button class="download-btn" onclick="downloadFile('${file.name}')">Download</button>
+                `;
+                fileList.appendChild(card);
+
+                // If it's an image, fetch it securely to create a preview
+                if (isImage) loadSecureImagePreview(file.name);
+            });
+        } catch (e) {
+            fileList.innerHTML = '<p style="color:red;">Failed to load files.</p>';
+        }
+    }
+
+    // --- The Secure Image Preview Trick ---
+    async function loadSecureImagePreview(filename) {
+        try {
+            const res = await fetch(`/api/download/${filename}`, {
+                headers: { 'Authorization': 'Bearer ' + token }
+            });
+            const blob = await res.blob();
+            const imageUrl = URL.createObjectURL(blob);
+            document.getElementById(`preview-${filename}`).src = imageUrl;
+        } catch (e) {
+            console.error("Failed to load preview for", filename);
+        }
+    }
+
+    async function downloadFile(filename) {
+        // Fetch the file securely, then force the browser to save it
+        const res = await fetch(`/api/download/${filename}`, {
+            headers: { 'Authorization': 'Bearer ' + token }
+        });
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    async function uploadFiles() {
+        const input = document.getElementById('file-input');
+        const status = document.getElementById('upload-status');
+        
+        if (input.files.length === 0) {
+            status.innerText = "Please select files first.";
+            return;
+        }
+
+        const formData = new FormData();
+        for (let i = 0; i < input.files.length; i++) {
+            formData.append('files', input.files[i]);
+        }
+
+        status.innerText = "Uploading... please wait.";
+        
+        try {
+            const res = await fetch('/api/upload', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token },
+                body: formData // Fetch automatically sets the multipart boundary!
+            });
+
+            if (res.ok) {
+                status.innerText = "Upload complete!";
+                input.value = ''; // clear input
+                loadFiles(); // Refresh the list
+            } else {
+                status.innerText = "Upload failed.";
+            }
+        } catch (e) {
+            status.innerText = "Network error during upload.";
+        }
+    }
+</script>
+</body>
+</html>
