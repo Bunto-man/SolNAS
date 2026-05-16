@@ -14,10 +14,10 @@ tokio = { version = "1.47.1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["compat", "io"] }
 tower = "0.5.2"
 tower-cookies = "0.11.0"
+tower-http = { version = "0.5", features = ["fs", "cors"] }
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 rcgen = "0.11"
 chrono = "0.4.44"
 mimalloc = "0.1.48"
-tower-http = { version = "0.5", features = ["fs"] }
 jsonwebtoken = "9.3"
 rand = "0.8"

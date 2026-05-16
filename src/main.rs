@@ -25,7 +25,7 @@ use tokio_util::io::ReaderStream;
 use axum::{
     body::Body,
     extract::{DefaultBodyLimit,Multipart, Path as AxumPath,Request,Query,RawQuery},
-    http::{header, HeaderMap, StatusCode,HeaderValue},
+    http::{header, HeaderMap, StatusCode,HeaderValue,Method},
     middleware::Next,
     middleware,
     response::{IntoResponse,Response},
@@ -35,7 +35,10 @@ use axum::{
     
 };//axum
 use serde_json::{Value, json};
-use tower_http::services::{ServeDir, ServeFile};
+use tower_http::{
+    services::{ServeDir, ServeFile},
+    cors::{Any,CorsLayer}
+};
 use serde::{Serialize,Deserialize};
 use jsonwebtoken::{
     encode, 
@@ -56,6 +59,11 @@ pub struct AppConfig {
     pub max_upload_size: u64,
     pub upload_speed_bps: u64,   // 0 means unlimited
     
+}
+
+#[derive(Deserialize)]
+struct DeleteRequest {
+    path: String, // e.g., "Photos/Vacation/beach.jpg" or just "Photos/Vacation"
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -325,7 +333,10 @@ async fn main() {
         eprintln!("Error setting password: {}", e);
         return;
     }
-   
+   let cors = CorsLayer::new()
+    .allow_origin(Any)
+    .allow_methods([Method::GET, Method::POST])
+    .allow_headers(Any);
     
     //define the routes that the "website" allows
    let api_routes = Router::new()
@@ -334,6 +345,7 @@ async fn main() {
         .route("/download/{*path}", get(api_download))
         .route("/folders", post(api_create_folder))
         .route("/move", post(api_move))
+        .route("/delete", post(api_delete))
 
         .route_layer(middleware::from_fn(api_require_auth)) // The protected routes are protected by authentication
 
@@ -348,8 +360,8 @@ async fn main() {
         // Anything starting with /api goes to the API router
         .nest("/api", api_routes) 
         // Anything else (like a browser asking for the website) gets served static files
-        .fallback_service(serve_ui);
-
+        .fallback_service(serve_ui)
+        .layer(cors);
         // 1. Load the certificate and private key
         // Ensure cert.pem and key.pem are GENERATED!
     let config = RustlsConfig::from_pem_file(
@@ -914,6 +926,51 @@ async fn api_move(Json(payload): Json<MoveRequest>) -> impl IntoResponse {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"status": "error", "message": "Failed to move file. Ensure target folder exists."}))
             ).into_response()
+        }
+    }
+}
+
+async fn api_delete(Json(payload): Json<DeleteRequest>) -> impl IntoResponse {
+    // 1. Sanitize the path
+    let safe_path = match resolve_safe_path(&payload.path) {
+        Ok(path) => path,
+        Err(e) => return (
+            StatusCode::BAD_REQUEST, 
+            Json(json!({"status": "error", "message": e}))
+        ).into_response(),
+    };
+
+    // 2. Ensure it exists
+    if !safe_path.exists() {
+        return (
+            StatusCode::NOT_FOUND, 
+            Json(json!({"status": "error", "message": "File or folder not found"}))
+        ).into_response();
+    }
+
+    // 3. Delete it (Tokio requires different functions for files vs folders)
+    if safe_path.is_dir() {
+        // remove_dir_all acts like `rm -rf`, safely wiping the folder and everything inside it
+        match tokio::fs::remove_dir_all(&safe_path).await {
+            Ok(_) => {
+                println!("🗑️ Deleted folder: {}", payload.path);
+                (StatusCode::OK, Json(json!({"status": "success", "message": "Folder deleted."}))).into_response()
+            }
+            Err(e) => {
+                println!("ERROR: Failed to delete folder '{}': {}", payload.path, e);
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"status": "error", "message": "Failed to delete folder."}))).into_response()
+            }
+        }
+    } else {
+        match tokio::fs::remove_file(&safe_path).await {
+            Ok(_) => {
+                println!("🗑️ Deleted file: {}", payload.path);
+                (StatusCode::OK, Json(json!({"status": "success", "message": "File deleted."}))).into_response()
+            }
+            Err(e) => {
+                println!("ERROR: Failed to delete file '{}': {}", payload.path, e);
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"status": "error", "message": "Failed to delete file."}))).into_response()
+            }
         }
     }
 }

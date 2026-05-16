@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>rShare NAS</title>
+    <title>SolNAS</title>
     <style>
         :root {
-            --primary: #007bff;
+            --primary: #0066ff;
             --bg: #f4f7f6;
             --card-bg: #ffffff;
             --text: #333;
@@ -48,16 +48,16 @@
 
 <div class="container">
     <div id="login-screen">
-        <h2>NAS Login</h2>
-        <input type="password" id="password" placeholder="Enter Password">
+        <h2>SolNAS Login</h2>
+        <input type="password" id="password" placeholder="Enter Dashboard Password">
         <button onclick="login()">Access Files</button>
-        <p id="login-error" style="color: red;"></p>
+        <p id="login-error" style="color: rgb(255, 0, 0);"></p>
     </div>
 
     <div id="dashboard-screen" class="hidden">
         <div style="display: flex; justify-content: space-between; align-items: center;">
             <h2>My Files</h2>
-            <button onclick="logout()" style="width: auto; background-color: #dc3545; margin-bottom: 0;">Logout</button>
+            <button onclick="logout()" style="width: auto; background-color: #eb3b4d; margin-bottom: 0;">Logout</button>
         </div>
 
         <div style="background: white; padding: 15px; border-radius: 12px; margin-top: 20px; margin-bottom: 20px;">
