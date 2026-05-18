@@ -21,3 +21,5 @@ chrono = "0.4.44"
 mimalloc = "0.1.48"
 jsonwebtoken = "9.3"
 rand = "0.8"
+
+rust-embed = "8.0"

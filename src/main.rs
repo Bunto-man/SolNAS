@@ -25,7 +25,7 @@ use tokio_util::io::ReaderStream;
 use axum::{
     body::Body,
     extract::{DefaultBodyLimit,Multipart, Path as AxumPath,Request,Query,RawQuery},
-    http::{header, HeaderMap, StatusCode,HeaderValue,Method},
+    http::{header, HeaderMap,Uri, StatusCode,HeaderValue,Method},
     middleware::Next,
     middleware,
     response::{IntoResponse,Response},
@@ -53,6 +53,8 @@ use rand::{
     Rng,
     distributions::Alphanumeric
 };
+
+use rust_embed::RustEmbed;
 
 //-----------------------------------------------------------------------------------------------
 pub struct AppConfig {
@@ -84,6 +86,10 @@ struct FileInfo {
     is_dir: bool,
 }
 
+#[derive(RustEmbed)]
+#[folder = "web_ui/"] 
+struct WebAssets;
+
 #[derive(Deserialize)]
 struct FolderRequest {
     path: String, // e.g., "Photos/Vacation/Hawaii"
@@ -98,6 +104,8 @@ struct MoveRequest {
 ///this is a struct for the password.
 #[derive(Deserialize)]
 struct LoginForm { password: String }
+
+
 
 
 //-------------------------------------------------------------------------------------------------------
@@ -353,14 +361,13 @@ async fn main() {
 
         .layer(DefaultBodyLimit::max(CONFIG.max_upload_size as usize));
 
-    let serve_ui = ServeDir::new("web_ui")
-        .fallback(ServeFile::new("web_ui/index.html"));
+    
 
     let app = Router::new()
         // Anything starting with /api goes to the API router
         .nest("/api", api_routes) 
         // Anything else (like a browser asking for the website) gets served static files
-        .fallback_service(serve_ui)
+        .fallback(serve_embedded_assets)
         .layer(cors);
         // 1. Load the certificate and private key
         // Ensure cert.pem and key.pem are GENERATED!
@@ -970,6 +977,41 @@ async fn api_delete(Json(payload): Json<DeleteRequest>) -> impl IntoResponse {
             Err(e) => {
                 println!("ERROR: Failed to delete file '{}': {}", payload.path, e);
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"status": "error", "message": "Failed to delete file."}))).into_response()
+            }
+        }
+    }
+}
+
+async fn serve_embedded_assets(uri: Uri) -> impl IntoResponse {
+    // 1. Clean up the path requested by the browser
+    let mut path = uri.path().trim_start_matches('/').to_string();
+
+    // 2. If they hit the root "/", default to index.html
+    if path.is_empty() {
+        path = "index.html".to_string();
+    }
+
+    // DEBUG: Print out exactly what the binary is looking for in its internal memory
+    println!("Web UI searching for embedded asset: '{}'", path);
+
+    // 3. Attempt to find the specific file requested
+    match WebAssets::get(path.as_str()) {
+        Some(content) => {
+            let mime = mime_guess::from_path(path).first_or_octet_stream();
+            ([(header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
+        }
+        None => {
+            // 4. SPA FALLBACK: If the specific file wasn't found, try serving index.html 
+            // instead of a 404. This allows frontend routers to work!
+            match WebAssets::get("index.html") {
+                Some(index_content) => {
+                    let mime = mime_guess::from_path("index.html").first_or_octet_stream();
+                    ([(header::CONTENT_TYPE, mime.as_ref())], index_content.data).into_response()
+                }
+                None => {
+                    // This only hits if "index.html" is missing entirely from the web_ui folder
+                    (StatusCode::NOT_FOUND, "Critical Error: index.html not found in embedded assets!").into_response()
+                }
             }
         }
     }
