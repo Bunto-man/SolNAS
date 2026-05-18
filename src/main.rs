@@ -129,27 +129,26 @@ static CONFIG: Lazy<AppConfig> = Lazy::new(|| {
     // Set your defaults here
     let mut current_config = AppConfig {
         max_upload_size: 1024 * 1024 * 1024, // 1GB
-        upload_speed_bps: 1024*1024,                 // 1 MB default
+        upload_speed_bps: 0,                 // 1 MB default
         
     };
 
     if !std::path::Path::new(config_path).exists() {
         println!("Config file not found. Creating {}...", config_path);
         let mut file = std::fs::File::create(config_path).expect("Failed to create config file");
-        //rewrite this so that it can use multipliers.
-        //now it should be able to parse itself...
+       
+
         writeln!(file, "[Settings]").unwrap();
         writeln!(file, "# Set max upload size in bytes. 1024*1024*1024 = 1GB").unwrap();
         writeln!(file, "# default is 1024*1024*1024 bytes").unwrap();
-        writeln!(file, "# Set max upload/download speed in bytes per second (0 = unlimited), 1024*1024 = 1MB Default").unwrap();
+        writeln!(file, "# Set max upload/download speed in bytes per second (0 = unlimited), 1024*1024 = 1MB ").unwrap();
         writeln!(file, "file_Size= 1024*1024*1024").unwrap();
-        writeln!(file, "upload_speed= 1024*1024").unwrap();
+        writeln!(file, "upload_speed= 0").unwrap();
         
         
         return current_config;
     }
-    //I want users to be able to input multipliers.
-    //this parses strings and returns the bit size for the program.
+    
 
     // Read the file and update the struct if values are found
     let content = std::fs::read_to_string(config_path).unwrap_or_default();
@@ -382,11 +381,12 @@ async fn main() {
     let lan_ip = get_local_ip().unwrap_or_else(|| "unknown".into());
     let port = 8080;
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-
-    println!(" rShare running (HTTPS):");
-    println!("  Local  -> https://localhost:{}/login", port);
-    println!("  LAN    -> https://{}:{}/login", lan_ip, port);
-    println!("  !Note: Accept the browser warning to proceed, connection is secure!");
+    println!("\n--Server Layer--");
+    println!(" SolNAS sarting up server");
+    //println!("  Localhost  -> https://localhost:{}/login", port);
+    println!("    Website Connection   -> https://{}:{}/login", lan_ip, port);
+    println!("       Enter {} into client login (if using app)",&lan_ip);
+    println!("\n--File Size Layer--");
 
     //make some pretty values for the user.
 
@@ -394,14 +394,15 @@ async fn main() {
     let pretty_upload_speed =CONFIG.upload_speed_bps as f64 / (1024.0*1024.0);
     
 
-    println!("\n   Upload Speed : {:.2}MB/s",pretty_upload_speed);
-    println!("-~ Max File Size Set To {:.2} GB | This Can Be Changed In Config.ini ~-\n",pretty_max_size);
+    println!("Max File Size Set To {:.2} GB",pretty_max_size);
 
-    //give a special message if upload or download are maximum.
-    if pretty_upload_speed <=0.0{println!("!~`Upload Speed is set to Maximum`~!");
+    if pretty_upload_speed <=0.0{println!("   Upload Speed is set to Infinite");
+    }else{
+        println!("   Upload Speed : {:.2}MB/s",pretty_upload_speed);
     }
-    println!("-------------------------------------------------------------------------------------");
-
+    println!("     Use config.ini to change these values");
+    println!("     Shut down using ctrl+C");
+    println!("--Begin Feedback Layer--\n");
     //new stuff: 
     let handle = axum_server::Handle::new();
     let shutdown_handle = handle.clone();
@@ -409,7 +410,7 @@ async fn main() {
     tokio::spawn(async move {
         // Wait for the user to press Ctrl+C
         tokio::signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
-        println!("\n[System] Gracefully shutting down SolNAS tool...");
+        println!("\n[System] Gracefully shutting down SolNAS Server...");
     
         // Give the server time to shut down gracefully.
         shutdown_handle.graceful_shutdown(Some(std::time::Duration::from_secs(15)));
