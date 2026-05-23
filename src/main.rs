@@ -410,7 +410,7 @@ async fn main() {
     tokio::spawn(async move {
         // Wait for the user to press Ctrl+C
         tokio::signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
-        println!("\n[System] Gracefully shutting down SolNAS Server...");
+        println!("\n[SolNAS] Gracefully shutting down SolNAS Server...");
     
         // Give the server time to shut down gracefully.
         shutdown_handle.graceful_shutdown(Some(std::time::Duration::from_secs(15)));
@@ -439,11 +439,11 @@ async fn api_login(Json(data): Json<LoginForm>) -> Result<Json<Value>, (StatusCo
     if data.password == *APP_PASSWORD {
         println!("Successful API login generated on {}", get_time());
 
-        // Set expiration for 24 hours from now
+        
         let expiration = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_secs() as usize + (24 * 3600);
+            .as_secs() as usize + (4 * 60 * 60); // for 24 hours, 60sec*60 *24 set to 4hrs for now.
 
         let claims = Claims {
             sub: "admin".to_owned(),
