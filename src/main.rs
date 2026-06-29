@@ -17,11 +17,14 @@ use mime_guess;
 
 
 use tokio::{
-    fs::File,
+    fs::{File, OpenOptions},
     io::{AsyncWriteExt, BufReader,BufWriter},   // BufReader added for streaming  
 };
 use dotenvy;
-use tokio_util::io::ReaderStream; 
+use tokio_util::{
+io::ReaderStream,
+bytes,
+};
 use axum::{
     body::Body,
     extract::{DefaultBodyLimit,Multipart, Path as AxumPath,Request,Query,RawQuery},
@@ -348,10 +351,12 @@ async fn main() {
    let api_routes = Router::new()
         .route("/files", get(api_list_files))
         .route("/upload", post(api_upload))
+        .route("/upload_chunk", post(api_upload_chunk))
         .route("/download/{*path}", get(api_download))
         .route("/folders", post(api_create_folder))
         .route("/move", post(api_move))
         .route("/delete", post(api_delete))
+
 
         .route_layer(middleware::from_fn(api_require_auth)) // The protected routes are protected by authentication
 
@@ -628,6 +633,12 @@ async fn api_upload(headers: HeaderMap, mut multipart: Multipart) -> impl IntoRe
             Ok(None) => break,      // End of the file stream. Break out of the loop.
                 Err(e) => {             // Network error handling
                     println!("ERROR: Network chunk failed: {}", e);
+
+                    drop(buf_writer); // drop the file lock
+
+                    let _ = tokio::fs::remove_file(&full_path).await;
+                    println!("🧹 Cleaned up corrupted partial file: {}", filename); //get rid of the corrupted file.
+
                     return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({"status": "error", "message": "Upload interrupted by network error."}))
@@ -1015,4 +1026,66 @@ async fn serve_embedded_assets(uri: Uri) -> impl IntoResponse {
             }
         }
     }
+}
+//test me out if it works
+async fn api_upload_chunk(mut multipart: Multipart) -> impl IntoResponse {
+    let mut target_filename = String::new();
+    let mut chunk_index: u64 = 0;
+    let mut total_chunks: u64 = 0;
+    let mut chunk_data: Option<bytes::Bytes> = None;
+
+    // 1. Extract the metadata and the file bytes from the multipart form
+    while let Some(field) = multipart.next_field().await.unwrap() {
+        match field.name() {
+            Some("filename") => target_filename = field.text().await.unwrap_or_default(),
+            Some("chunk_index") => chunk_index = field.text().await.unwrap_or_default().parse().unwrap_or(0),
+            Some("total_chunks") => total_chunks = field.text().await.unwrap_or_default().parse().unwrap_or(1),
+            Some("file") => chunk_data = Some(field.bytes().await.unwrap()),
+            _ => {}
+        }
+    }
+
+    if chunk_data.is_none() || target_filename.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(json!({"status": "error", "message": "Missing file data or filename."}))).into_response();
+    }
+
+    // 2. Sanitize the path perfectly
+    let full_path = match resolve_safe_path(&target_filename) {
+        Ok(path) => path,
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({"status": "error", "message": e}))).into_response(),
+    };
+
+    // Create parent directories if they don't exist
+    if let Some(parent_dir) = full_path.parent() {
+        let _ = tokio::fs::create_dir_all(parent_dir).await;
+    }
+
+    let data = chunk_data.unwrap();
+
+    // 3. The Magic: Overwrite if it's the first chunk, Append if it's the rest!
+    let mut file = if chunk_index == 0 {
+        // Start of file: create new or overwrite existing
+        match OpenOptions::new().create(true).write(true).truncate(true).open(&full_path).await {
+            Ok(f) => f,
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"status": "error", "message": e.to_string()}))).into_response(),
+        }
+    } else {
+        // Middle of file: open in append mode
+        match OpenOptions::new().append(true).open(&full_path).await {
+            Ok(f) => f,
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"status": "error", "message": e.to_string()}))).into_response(),
+        }
+    };
+
+    // 4. Write the chunk to the hard drive
+    if let Err(e) = file.write_all(&data).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"status": "error", "message": e.to_string()}))).into_response();
+    }
+
+    // 5. If this was the final chunk, log the success
+    if chunk_index == total_chunks - 1 {
+        println!("✅ Reassembled and saved '{}' successfully!", target_filename);
+    }
+
+    (StatusCode::OK, Json(json!({"status": "success"}))).into_response()
 }
