@@ -7,7 +7,7 @@ use std::{
     fs,
     net::{SocketAddr, UdpSocket},
     path::{Path,PathBuf,Component},
-    io::{self, Write},
+    io::{self, Write,SeekFrom},
     time::{Instant,SystemTime,UNIX_EPOCH},
     
 };//standard
@@ -18,7 +18,7 @@ use mime_guess;
 
 use tokio::{
     fs::{File, OpenOptions},
-    io::{AsyncWriteExt, BufReader,BufWriter},   // BufReader added for streaming  
+    io::{AsyncWriteExt, BufReader,BufWriter,AsyncSeekExt},   // BufReader added for streaming  
 };
 use dotenvy;
 use tokio_util::{
@@ -1032,6 +1032,7 @@ async fn api_upload_chunk(mut multipart: Multipart) -> impl IntoResponse {
     let mut target_filename = String::new();
     let mut chunk_index: u64 = 0;
     let mut total_chunks: u64 = 0;
+    let mut offset: u64 = 0; // tracks the new offset.
     let mut chunk_data: Option<bytes::Bytes> = None;
 
     // 1. Extract the metadata and the file bytes from the multipart form
@@ -1040,6 +1041,7 @@ async fn api_upload_chunk(mut multipart: Multipart) -> impl IntoResponse {
             Some("filename") => target_filename = field.text().await.unwrap_or_default(),
             Some("chunk_index") => chunk_index = field.text().await.unwrap_or_default().parse().unwrap_or(0),
             Some("total_chunks") => total_chunks = field.text().await.unwrap_or_default().parse().unwrap_or(1),
+            Some("offset") => offset = field.text().await.unwrap_or_default().parse().unwrap_or(0), // NEW: Parse offset
             Some("file") => chunk_data = Some(field.bytes().await.unwrap()),
             _ => {}
         }
@@ -1063,26 +1065,21 @@ async fn api_upload_chunk(mut multipart: Multipart) -> impl IntoResponse {
     let data = chunk_data.unwrap();
 
     // 3. The Magic: Overwrite if it's the first chunk, Append if it's the rest!
-    let mut file = if chunk_index == 0 {
-        // Start of file: create new or overwrite existing
-        match OpenOptions::new().create(true).write(true).truncate(true).open(&full_path).await {
+    let mut file = match OpenOptions::new().create(true).write(true).open(&full_path).await {
             Ok(f) => f,
             Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"status": "error", "message": e.to_string()}))).into_response(),
-        }
-    } else {
-        // Middle of file: open in append mode
-        match OpenOptions::new().append(true).open(&full_path).await {
-            Ok(f) => f,
-            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"status": "error", "message": e.to_string()}))).into_response(),
-        }
-    };
-
-    // 4. Write the chunk to the hard drive
+        }; //first
+    
+    //This is second. Finds the correct spot to put the chunk.
+    if let Err(e) = file.seek(SeekFrom::Start(offset)).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"status": "error", "message": e.to_string()}))).into_response();
+    }
+    //  Write the chunk to the hard drive, this is third
     if let Err(e) = file.write_all(&data).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"status": "error", "message": e.to_string()}))).into_response();
     }
 
-    // 5. If this was the final chunk, log the success
+    // If this was the final chunk, log the success
     if chunk_index == total_chunks - 1 {
         println!("✅ Reassembled and saved '{}' successfully!", target_filename);
     }
