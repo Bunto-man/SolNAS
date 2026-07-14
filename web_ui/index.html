@@ -4,44 +4,99 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SolNAS</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
         :root {
-            --primary: #0066ff;
-            --bg: #f4f7f6;
-            --card-bg: #ffffff;
-            --text: #333;
+            --primary: #7700ff;
+            --bg: #333 ;
+            --card-bg: #6e6e6e;
+            --text: #ffffff;
         }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--bg);
-            color: var(--text);
-            margin: 0;
-            padding: 20px;
-        }
-        .container { max-width: 800px; margin: 0 auto; }
-        .hidden { display: none !important; }
-        
-        input[type="password"], input[type="file"] {
-            width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ccc; border-radius: 8px; box-sizing: border-box;
-        }
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                    background-color: var(--bg);
+                    color: var(--text);
+                    margin: 0;
+                    padding: 10px; /* Reduced base padding for mobile screens */
+                }
+                .container {
+                    max-width: 800px;
+                    margin: 0 auto;
+                    width: 100%; /* Ensures it doesn't overflow small screens */
+                    box-sizing: border-box;
+                }
+                .hidden { display: none !important; }
+                input[type="password"], input[type="file"] {
+                    width: 100%;
+                    padding: 12px;
+                    margin: 10px 0;
+                    border: 1px solid #ccc;
+                    border-radius: 8px;
+                    box-sizing: border-box;
+                    font-size: 16px; /* CRITICAL: Prevents iOS/Android from auto-zooming! */
+                }
         button {
             background-color: var(--primary); color: white; border: none; padding: 12px 20px; border-radius: 8px; width: 100%; font-size: 16px; cursor: pointer; margin-bottom: 20px;
         }
-        button:hover { background-color: #0056b3; }
+        button:hover { background-color: #6115b8; }
 
-        .file-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 15px; }
+        .file-grid {
+                    display: grid;
+                    /* Shrinking minmax to 110px allows grid to scale down beautifully on phones */
+                    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+                    gap: 10px;
+                }
         .file-card {
             background: var(--card-bg); padding: 15px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); text-align: center; word-break: break-all;
+            position: relative;
         }
         .file-card img { max-width: 100%; height: 100px; object-fit: cover; border-radius: 8px; margin-bottom: 10px; }
-        .file-size { font-size: 12px; color: #525151; margin-top: 5px; }
-        .download-btn { background-color: #28a745; margin-top: 10px; padding: 8px; font-size: 14px; }
+        .file-size { font-size: 12px; color: #252525; margin-top: 5px; }
+        .download-btn { background-color: #7700ff; margin-top: 10px; padding: 8px; font-size: 14px; }
         .open-btn { background-color: var(--primary); margin-top: 10px; padding: 8px; font-size: 14px; }
-        
+
         /* Navigation Bar Styles */
         .nav-bar { display: flex; align-items: center; margin-bottom: 20px; background: white; padding: 10px 15px; border-radius: 8px;}
         .nav-bar button { width: auto; margin: 0 15px 0 0; padding: 8px 15px; background-color: #6c757d;}
         .nav-path { font-weight: bold; font-family: monospace; word-break: break-all;}
+
+        /* Checkbox styling */
+        .file-select-cb {
+            width: 18px !important;
+            height: 18px !important;
+            cursor: pointer;
+            margin: 0 !important;
+        }
+        /* --- MOBILE RESPONSIVE OVERRIDES --- */
+                @media (max-width: 600px) {
+                    body { padding: 10px 5px; }
+
+                    /* Stacks the header title and logout/download buttons vertically on mobile */
+                    #dashboard-screen > div:first-child {
+                        flex-direction: column;
+                        align-items: stretch !important;
+                        gap: 10px;
+                    }
+
+                    #dashboard-screen > div:first-child div {
+                        display: flex;
+                        flex-direction: column;
+                        gap: 8px;
+                    }
+
+                    /* Make top bar buttons full-width for easy thumb tapping */
+                    #batch-download-btn, #dashboard-screen button {
+                        width: 100% !important;
+                        margin: 0 !important;
+                        box-sizing: border-box;
+                    }
+
+                    /* Wrap navigation path cleanly if inside a deep folder */
+                    .nav-bar {
+                        flex-wrap: wrap;
+                        gap: 10px;
+                    }
+                }
     </style>
 </head>
 <body>
@@ -57,7 +112,12 @@
     <div id="dashboard-screen" class="hidden">
         <div style="display: flex; justify-content: space-between; align-items: center;">
             <h2>Available Files</h2>
-            <button onclick="logout()" style="width: auto; background-color: #eb3b4d; margin-bottom: 0;">Logout</button>
+            <div>
+                <button id="batch-download-btn" class="hidden" onclick="downloadSelectedFiles()" style="width: auto; background-color: #28a745; margin-bottom: 0; margin-right: 10px;">
+                    ⬇️ Download Selected (<span id="selected-count">0</span>)
+                </button>
+                <button onclick="logout()" style="width: auto; background-color: #eb3b4d; margin-bottom: 0;">Logout</button>
+            </div>
         </div>
 
         <div style="background: white; padding: 15px; border-radius: 12px; margin-top: 20px; margin-bottom: 20px;">
@@ -68,7 +128,7 @@
         </div>
 
         <div class="nav-bar" id="nav-bar">
-            <button onclick="goUp()" id="back-btn">⬅ Back</button>
+            <button onclick="goUp()" id="back-btn"> ⬅️ Back</button>
             <span class="nav-path" id="current-path-display">/</span>
         </div>
 
@@ -77,6 +137,7 @@
 </div>
 
 <script>
+    let selectedFiles = new Set();
     let token = localStorage.getItem('nas_token');
     let currentPath = ""; // Tracks where we are in the NAS
 
@@ -138,11 +199,15 @@
     // --- File Loading ---
     async function loadFiles() {
         updateNavBar();
+
+        // Reset selections when changing folders
+        selectedFiles.clear();
+        updateBatchButton();
+
         const fileList = document.getElementById('file-list');
         fileList.innerHTML = '<p>Loading files...</p>';
 
         try {
-            // Append the path query to the API call
             let url = '/api/files';
             if (currentPath !== "") url += '?path=' + encodeURIComponent(currentPath);
 
@@ -155,7 +220,6 @@
                 const card = document.createElement('div');
                 card.className = 'file-card';
 
-                // Check the boolean we added to the backend!
                 if (file.is_dir) {
                     card.innerHTML = `
                         <div style="font-size: 40px; margin-bottom: 10px;">📁</div>
@@ -165,10 +229,17 @@
                     `;
                 } else {
                     const isImage = file.name.match(/\.(jpg|jpeg|png|gif)$/i);
-                    // Build the full path so the backend knows exactly where to download it from
                     const fullFilePath = currentPath ? `${currentPath}/${file.name}` : file.name;
 
+                    // Added Checkbox strictly for files
+                    const checkboxHtml = `
+                        <div style="text-align: left; margin-bottom: 5px;">
+                            <input type="checkbox" class="file-select-cb" value="${file.name}" onchange="toggleSelection(this)">
+                        </div>
+                    `;
+
                     card.innerHTML = `
+                        ${checkboxHtml}
                         ${isImage ? `<img id="preview-${file.name}" src="" alt="loading..."/>` : '<div style="font-size: 40px; margin-bottom: 10px;">📄</div>'}
                         <div style="font-weight: bold;">${file.name}</div>
                         <div class="file-size">${formatBytes(file.size)}</div>
@@ -199,10 +270,9 @@
         });
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
-        
-        // Extract just the filename for the save prompt
+
         const filenameOnly = fullFilePath.split('/').pop();
-        
+
         const a = document.createElement('a');
         a.href = url;
         a.download = filenameOnly;
@@ -220,24 +290,98 @@
         const formData = new FormData();
         for (let i = 0; i < input.files.length; i++) {
             const file = input.files[i];
-            // Trick: We spoof the filename being sent to the backend so it includes the current folder!
             const targetPath = currentPath ? `${currentPath}/${file.name}` : file.name;
             formData.append('files', file, targetPath);
         }
 
         status.innerText = "Uploading... please wait.";
-        
+
         try {
             const res = await fetch('/api/upload', {
                 method: 'POST', headers: { 'Authorization': 'Bearer ' + token }, body: formData
             });
             if (res.ok) {
                 status.innerText = "Upload complete!";
-                input.value = ''; 
-                loadFiles(); 
+                input.value = '';
+                loadFiles();
             } else { status.innerText = "Upload failed."; }
         } catch (e) { status.innerText = "Network error."; }
     }
+
+    // --- Batch Selection & Download Logic ---
+    function toggleSelection(checkbox) {
+        if (checkbox.checked) {
+            selectedFiles.add(checkbox.value);
+        } else {
+            selectedFiles.delete(checkbox.value);
+        }
+        updateBatchButton();
+    }
+
+    function updateBatchButton() {
+        const btn = document.getElementById('batch-download-btn');
+        const countSpan = document.getElementById('selected-count');
+
+        if (selectedFiles.size > 0) {
+            btn.classList.remove('hidden');
+            countSpan.innerText = selectedFiles.size;
+        } else {
+            btn.classList.add('hidden');
+        }
+    }
+
+    async function downloadSelectedFiles() {
+        const status = document.getElementById('upload-status');
+        const total = selectedFiles.size;
+        let current = 0;
+
+        status.innerText = `Starting batch download of ${total} files...`;
+        const zip = new JSZip();
+
+        for (const filename of selectedFiles) {
+            current++;
+            status.innerText = `Downloading (${current}/${total}): ${filename}...`;
+            const fullPath = currentPath ? `${currentPath}/${filename}` : filename;
+
+            try {
+                // Uses authenticated fetch so the server permits the download
+                const res = await fetch(`/api/download/${fullPath}`, {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                const blob = await res.blob();
+                zip.file(filename, blob);
+
+            } catch (e) {
+                console.error(`Failed to download ${filename}`, e);
+            }
+        }
+
+        status.innerText = "Compressing ZIP archive...";
+        try {
+                    // Generate the final .zip file
+                    const content = await zip.generateAsync({ type: "blob" });
+                    const url = URL.createObjectURL(content);
+
+                    // Trigger a single download prompt!
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `SolNAS_Batch_${Date.now()}.zip`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                } catch (e) {
+                    status.innerText = "Failed to create zip archive.";
+                    console.error(e);
+                }
+
+                status.innerText = "Batch download complete!";
+
+                // Reset selections and UI
+                selectedFiles.clear();
+                document.querySelectorAll('.file-select-cb').forEach(cb => cb.checked = false);
+                updateBatchButton();
+            }
 </script>
 </body>
 </html>
