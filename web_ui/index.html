@@ -7,7 +7,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
         :root {
-            --primary: #7700ff;
+            --primary: #a200ff;
             --bg: #333 ;
             --card-bg: #6e6e6e;
             --text: #ffffff;
@@ -104,7 +104,7 @@
 <div class="container">
     <div id="login-screen">
         <h2>SolNAS Login</h2>
-        <input type="password" id="password" placeholder="Enter NAS Password">
+        <input type="password" id="password" placeholder="Enter NAS Password" onkeydown="if(event.key === 'Enter') login()">
         <button onclick="login()">Access Dashboard</button>
         <p id="login-error" style="color: rgb(255, 0, 0);"></p>
     </div>
