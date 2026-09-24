@@ -8,7 +8,7 @@ use once_cell::sync::Lazy;
 
 use std::{
     env, fs,
-    io::{self, SeekFrom, Write},
+    io::{self, Cursor, SeekFrom, Write},
     net::{SocketAddr, UdpSocket},
     path::{Component, Path, PathBuf},
     sync::RwLock,
@@ -752,6 +752,10 @@ async fn api_list_files(Query(query): Query<ListQuery>) -> Response {
         .into_response()
 }
 
+#[derive(Deserialize)]
+pub struct DownloadQuery {
+    preview: Option<bool>,
+}
 ///Handles downloads from the program into the browser downloader.
 ///
 /// * `name` - the name of the file as defined by the names section.
@@ -786,13 +790,51 @@ async fn api_download(
             .into_response();
     }
 
-    // 3. Ensure it's actually a file, not a directory!
+    // Ensure it's actually a file, not a directory
     if full_path.is_dir() {
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({"status": "error", "message": "Cannot download a directory as a file."})),
         )
             .into_response();
+    }
+
+    //  Thumbnailing Update
+    let is_preview = query.as_deref().unwrap_or("").contains("preview=true");
+    let extension = full_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let is_image = matches!(extension.as_str(), "png" | "jpg" | "jpeg");
+
+    if is_preview && is_image {
+        // Read the raw file bytes from the NAS disk
+        if let Ok(bytes) = tokio::fs::read(&full_path).await {
+            // Offload the heavy decoding and resizing to a blocking thread so the server doesn't freeze
+            let thumbnail_result = tokio::task::spawn_blocking(move || {
+                let img = image::load_from_memory(&bytes).map_err(|_| "Failed to load image")?;
+
+                // Shrink it down dramatically[cite: 1]
+                let thumb = img.thumbnail(256, 256);
+
+                // Encode the new thumbnail back to JPEG bytes in memory
+                let mut buffer = Cursor::new(Vec::new());
+                thumb
+                    .write_to(&mut buffer, image::ImageOutputFormat::Jpeg(80))
+                    .map_err(|_| "Failed to encode thumbnail")?;
+
+                Ok::<Vec<u8>, &'static str>(buffer.into_inner())
+            })
+            .await
+            .unwrap_or(Err("Thread panic"));
+
+            if let Ok(thumb_bytes) = thumbnail_result {
+                let mut headers = HeaderMap::new();
+                headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("image/jpeg"));
+                return (headers, Body::from(thumb_bytes)).into_response();
+            }
+        }
     }
 
     //the file must be accessible.
@@ -863,7 +905,6 @@ async fn api_download(
     }
     //give the terminal some feedback for downloads
     headers.insert(header::CONTENT_LENGTH, HeaderValue::from(file_size)); //give a file size to the browser so that it can use its own time evaluation.
-    let is_preview = query.as_deref().unwrap_or("").contains("preview=true");
 
     if !is_preview {
         println!(
@@ -878,7 +919,6 @@ async fn api_download(
 //define API tools here for use with the client app
 
 async fn api_create_folder(Json(payload): Json<FolderRequest>) -> impl IntoResponse {
-    // 1. Sanitize the requested path
     let target_path = match resolve_safe_path(&payload.path) {
         Ok(path) => path,
         Err(e) => {
