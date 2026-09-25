@@ -1,3 +1,5 @@
+use mimalloc::MiMalloc;
+
 // The architecture of this app will be very similar to the architecture of both rshare and dropshare, deliberately,
 //so that I can change and borrow the best parts
 use axum_server::tls_rustls::RustlsConfig;
@@ -38,7 +40,13 @@ use tokio_util::{bytes, io::ReaderStream};
 use tower_http::cors::{Any, CorsLayer};
 
 use rust_embed::RustEmbed;
-
+//-----------------------------------------------------------------------------------------------
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;   //I really hate it, but the app does likely need mimalloc for linux users. glibc frags out and craps itself in the HTML runtime
+/*
+while mimalloc is terrible for windows, bumping the memory up to 55MB, it does seem to clear memory during runtime.
+Let's see for linux though.
+*/
 //-----------------------------------------------------------------------------------------------
 
 #[derive(Serialize, Deserialize, Clone)]
