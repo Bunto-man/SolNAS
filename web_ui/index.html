@@ -7,96 +7,83 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
         :root {
-            --primary: #a200ff;
-            --bg: #333 ;
-            --card-bg: #6e6e6e;
-            --text: #ffffff;
-        }
-        body {
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                    background-color: var(--bg);
-                    color: var(--text);
-                    margin: 0;
-                    padding: 10px; /* Reduced base padding for mobile screens */
-                }
-                .container {
-                    max-width: 800px;
-                    margin: 0 auto;
-                    width: 100%; /* Ensures it doesn't overflow small screens */
-                    box-sizing: border-box;
-                }
-                .hidden { display: none !important; }
-                input[type="password"], input[type="file"] {
-                    width: 100%;
-                    padding: 12px;
-                    margin: 10px 0;
-                    border: 1px solid #ccc;
-                    border-radius: 8px;
-                    box-sizing: border-box;
-                    font-size: 16px; /* CRITICAL: Prevents iOS/Android from auto-zooming! */
-                }
-        button {
-            background-color: var(--primary); color: white; border: none; padding: 12px 20px; border-radius: 8px; width: 100%; font-size: 16px; cursor: pointer; margin-bottom: 20px;
-        }
-        button:hover { background-color: #6115b8; }
+    --primary: #a200ff;
+    --primary-hover: #8c00de;
+    --bg: #1e1e1e;           /* Darker, richer background */
+    --card-bg: #2d2d2d;      /* Cleaner card contrast */
+    --text: #ffffff;
+    --text-muted: #a0a0a0;
+}
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background-color: var(--bg);
+    color: var(--text);
+    margin: 0;
+    padding: 15px;
+}
+.container {
+    max-width: 900px;
+    margin: 0 auto;
+    width: 100%;
+    box-sizing: border-box;
+}
+.hidden { display: none !important; }
+input[type="password"], input[type="file"] {
+    width: 100%; padding: 12px; margin: 10px 0; 
+    border: 1px solid #444; border-radius: 8px; 
+    background-color: #333; color: white;
+    box-sizing: border-box; font-size: 16px;
+}
+button {
+    background-color: var(--primary); color: white; border: none; 
+    padding: 12px 20px; border-radius: 8px; width: 100%; 
+    font-size: 16px; cursor: pointer; margin-bottom: 20px;
+    transition: background-color 0.2s ease, transform 0.1s ease;
+}
+button:hover { background-color: var(--primary-hover); }
+button:active { transform: scale(0.98); }
 
-        .file-grid {
-                    display: grid;
-                    /* Shrinking minmax to 110px allows grid to scale down beautifully on phones */
-                    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
-                    gap: 10px;
-                }
-        .file-card {
-            background: var(--card-bg); padding: 15px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); text-align: center; word-break: break-all;
-            position: relative;
-        }
-        .file-card img { max-width: 100%; height: 100px; object-fit: cover; border-radius: 8px; margin-bottom: 10px; }
-        .file-size { font-size: 12px; color: #252525; margin-top: 5px; }
-        .download-btn { background-color: #7700ff; margin-top: 10px; padding: 8px; font-size: 14px; }
-        .open-btn { background-color: var(--primary); margin-top: 10px; padding: 8px; font-size: 14px; }
+.file-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); /* Slightly larger base */
+    gap: 15px;
+}
+.file-card {
+    background: var(--card-bg); padding: 15px; border-radius: 12px; 
+    box-shadow: 0 4px 6px rgba(0,0,0,0.2); text-align: center; 
+    position: relative;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.file-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 12px rgba(0,0,0,0.3);
+}
+.file-card img { 
+    width: 100%; height: 100px; object-fit: cover; 
+    border-radius: 8px; margin-bottom: 10px; 
+}
+.file-name {
+    font-weight: bold; font-size: 14px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; /* Clean truncation */
+    margin-bottom: 5px;
+}
+.file-size { font-size: 12px; color: var(--text-muted); }
+.download-btn { background-color: #7700ff; margin-top: 10px; padding: 8px; font-size: 14px; }
+.open-btn { background-color: var(--primary); margin-top: 10px; padding: 8px; font-size: 14px; }
 
-        /* Navigation Bar Styles */
-        .nav-bar { display: flex; align-items: center; margin-bottom: 20px; background: white; padding: 10px 15px; border-radius: 8px;}
-        .nav-bar button { width: auto; margin: 0 15px 0 0; padding: 8px 15px; background-color: #6c757d;}
-        .nav-path { font-weight: bold; font-family: monospace; word-break: break-all;}
+.nav-bar { 
+    display: flex; align-items: center; margin-bottom: 20px; 
+    background: var(--card-bg); padding: 10px 15px; border-radius: 8px;
+}
+.nav-bar button { width: auto; margin: 0 15px 0 0; padding: 8px 15px; background-color: #555;}
+.nav-path { font-weight: bold; font-family: monospace; word-break: break-all; color: var(--primary);}
 
-        /* Checkbox styling */
-        .file-select-cb {
-            width: 18px !important;
-            height: 18px !important;
-            cursor: pointer;
-            margin: 0 !important;
-        }
-        /* --- MOBILE RESPONSIVE OVERRIDES --- */
-                @media (max-width: 600px) {
-                    body { padding: 10px 5px; }
+.file-select-cb { width: 18px !important; height: 18px !important; cursor: pointer; margin: 0 !important; }
 
-                    /* Stacks the header title and logout/download buttons vertically on mobile */
-                    #dashboard-screen > div:first-child {
-                        flex-direction: column;
-                        align-items: stretch !important;
-                        gap: 10px;
-                    }
-
-                    #dashboard-screen > div:first-child div {
-                        display: flex;
-                        flex-direction: column;
-                        gap: 8px;
-                    }
-
-                    /* Make top bar buttons full-width for easy thumb tapping */
-                    #batch-download-btn, #dashboard-screen button {
-                        width: 100% !important;
-                        margin: 0 !important;
-                        box-sizing: border-box;
-                    }
-
-                    /* Wrap navigation path cleanly if inside a deep folder */
-                    .nav-bar {
-                        flex-wrap: wrap;
-                        gap: 10px;
-                    }
-                }
+@media (max-width: 600px) {
+    body { padding: 10px; }
+    .file-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+}S
     </style>
 </head>
 <body>
@@ -223,7 +210,7 @@
                 if (file.is_dir) {
                     card.innerHTML = `
                         <div style="font-size: 40px; margin-bottom: 10px;">📁</div>
-                        <div style="font-weight: bold;">${file.name}</div>
+                        <div class="file-name" title="${file.name}">${file.name}</div>
                         <div class="file-size">Folder</div>
                         <button class="open-btn" onclick="openFolder('${file.name}')">Open</button>
                     `;
@@ -231,7 +218,6 @@
                     const isImage = file.name.match(/\.(jpg|jpeg|png|gif)$/i);
                     const fullFilePath = currentPath ? `${currentPath}/${file.name}` : file.name;
 
-                    // Added Checkbox strictly for files
                     const checkboxHtml = `
                         <div style="text-align: left; margin-bottom: 5px;">
                             <input type="checkbox" class="file-select-cb" value="${file.name}" onchange="toggleSelection(this)">
@@ -240,8 +226,8 @@
 
                     card.innerHTML = `
                         ${checkboxHtml}
-                        ${isImage ? `<img id="preview-${file.name}" src="" alt="loading..."/>` : '<div style="font-size: 40px; margin-bottom: 10px;">📄</div>'}
-                        <div style="font-weight: bold;">${file.name}</div>
+                        ${isImage ? `<img id="preview-${file.name}" src="" alt="loading..." loading="lazy"/>` : '<div style="font-size: 40px; margin-bottom: 10px;">📄</div>'}
+                        <div class="file-name" title="${file.name}">${file.name}</div>
                         <div class="file-size">${formatBytes(file.size)}</div>
                         <button class="download-btn" onclick="downloadFile('${fullFilePath}')">Download</button>
                     `;
