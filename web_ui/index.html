@@ -127,6 +127,30 @@ button:active { transform: scale(0.98); }
     let selectedFiles = new Set();
     let token = localStorage.getItem('nas_token');
     let currentPath = ""; // Tracks where we are in the NAS
+    let activeBlobUrls = []; //brand new
+
+    const imageObserver = new IntersectionObserver((entries, observer) => {
+    entries.forEach(entry => {
+        if (entry.isIntersecting) {
+            const img = entry.target;
+            const fullFilePath = img.getAttribute('data-filepath');
+            
+            fetch(`/api/download/${fullFilePath}?preview=true`, {
+                headers: { 'Authorization': 'Bearer ' + token }
+            })
+            .then(res => res.blob())
+            .then(blob => {
+                const url = URL.createObjectURL(blob);
+                activeBlobUrls.push(url); // Track it for later deletion
+                img.src = url;
+            })
+            .catch(e => console.error("Failed to load preview", e));
+            
+            // Stop observing this image once we start fetching it
+            observer.unobserve(img);
+        }
+    });
+}, { rootMargin: "200px" }); // Start loading 200px before it enters the screen
 
     if (token) showDashboard();
 
@@ -192,6 +216,10 @@ button:active { transform: scale(0.98); }
         updateBatchButton();
 
         const fileList = document.getElementById('file-list');
+
+        activeBlobUrls.forEach(url => URL.revokeObjectURL(url)); //this lets us destroy the RAM
+        activeBlobUrls = [];
+
         fileList.innerHTML = '<p>Loading files...</p>';
 
         try {
@@ -224,31 +252,38 @@ button:active { transform: scale(0.98); }
                         </div>
                     `;
 
+                    // We embed the file path into 'data-filepath' for the Observer to use
                     card.innerHTML = `
                         ${checkboxHtml}
-                        ${isImage ? `<img id="preview-${file.name}" src="" alt="loading..." loading="lazy"/>` : '<div style="font-size: 40px; margin-bottom: 10px;">📄</div>'}
+                        ${isImage ? `<img class="lazy-preview" data-filepath="${fullFilePath}" src="" alt="loading..."/>` : '<div style="font-size: 40px; margin-bottom: 10px;">📄</div>'}
                         <div class="file-name" title="${file.name}">${file.name}</div>
                         <div class="file-size">${formatBytes(file.size)}</div>
                         <button class="download-btn" onclick="downloadFile('${fullFilePath}')">Download</button>
                     `;
 
-                    if (isImage) loadSecureImagePreview(fullFilePath, file.name);
+                    fileList.appendChild(card);
+
+                    // Tell the observer to watch this specific image
+                    if (isImage) {
+                        const imgElement = card.querySelector('.lazy-preview');
+                        imageObserver.observe(imgElement);
+                    }
                 }
                 fileList.appendChild(card);
             });
         } catch (e) { fileList.innerHTML = '<p style="color:red;">Failed to load files.</p>'; }
     }
 
-    async function loadSecureImagePreview(fullFilePath, elementId) {
-        try {
-            const res = await fetch(`/api/download/${fullFilePath}?preview=true`, {
-                headers: { 'Authorization': 'Bearer ' + token }
-            });
-            const blob = await res.blob();
-            const imageUrl = URL.createObjectURL(blob);
-            document.getElementById(`preview-${elementId}`).src = imageUrl;
-        } catch (e) { console.error("Failed to load preview"); }
-    }
+    // async function loadSecureImagePreview(fullFilePath, elementId) {
+    //     try {
+    //         const res = await fetch(`/api/download/${fullFilePath}?preview=true`, {
+    //             headers: { 'Authorization': 'Bearer ' + token }
+    //         });
+    //         const blob = await res.blob();
+    //         const imageUrl = URL.createObjectURL(blob);
+    //         document.getElementById(`preview-${elementId}`).src = imageUrl;
+    //     } catch (e) { console.error("Failed to load preview"); }
+    // }
 
     async function downloadFile(fullFilePath) {
         const res = await fetch(`/api/download/${fullFilePath}`, {
