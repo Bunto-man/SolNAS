@@ -2,26 +2,27 @@
 name = "SolNAS"
 version = "0.1.0"
 edition = "2024"
-
+#went in and changed the features to exactly what is needed.
 [dependencies]
-axum = { version = "0.8", features = ["multipart"] }
-dotenvy ="0.15.7"
-mime_guess = "2.0.5"
-once_cell = "1.21.3"
-serde = { version = "1.0.226", features = ["derive"] }
-serde_json = "1.0.145"
-tokio = { version = "1.47.1", features = ["full"] }
-tokio-util = { version = "0.7", features = ["compat", "io"] }
-tower = "0.5.2"
-tower-cookies = "0.11.0"
-tower-http = { version = "0.5", features = ["fs", "cors"] }
-axum-server = { version = "0.7", features = ["tls-rustls"] }
-rcgen = "0.11"
+axum = { version = "0.8", default-features = false, features = ["multipart", "json","query"] }
+dotenvy ={version = "0.15.7", default-features = false}
+mime_guess = { version = "2.0.5", default-features = false}
+once_cell = { version ="1.21.3", default-features = false}
+serde = { version = "1.0.226", default-features= false, features = ["derive"] }
+serde_json = { version = "1.0.145", default-features = false}
+tokio = { version = "1.47.1", default-features = false, features = ["signal","process","rt-multi-thread" ]}
+tokio-util = { version = "0.7", default-features=false, features = ["compat", "io"] }
+tower = {version = "0.5.2", default-features = false}
+tower-cookies = { version = "0.11.0", default-features = false}
+tower-http = { version = "0.5", default-features = false, features = ["fs", "cors"] }
+axum-server = { version = "0.7",default-features = false, features = ["tls-rustls"] }
+rcgen = { version = "0.11"}
 chrono = "0.4.44"
 mimalloc = "0.1.48"
 jsonwebtoken = "9.3"
-rand = "0.8"
+rand = {version = "0.8", default-features = false, features = ["std", "std_rng"]}
+rust-embed = { version = "8.0", default-features = false}
+lazy_static = { version = "1.5.0", default-features = false}
+image = {version = "0.24", default-features = false, features = ["jpeg"]}
 
-rust-embed = "8.0"
-lazy_static = "1.5.0"
-image = "0.24"
+# optimized as much as possible?
