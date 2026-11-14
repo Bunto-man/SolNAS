@@ -883,13 +883,15 @@ async fn api_download(
     };
 
     //splitting the file up.
-    let chunk_size = 128 * 1024; //now controlled properly
-    let buf_reader = BufReader::with_capacity(chunk_size, file);
+    let chunk_size = 8 * 1024 * 1024; //now controlled properly //EDIT 2: Increase chunk size heavily! => Huge time save. 8 * 1024 *1024 vs 128 * 1024 =>
+    //lower chunk size + no change = 52 seconds ||Changes + bigger chunk size = 32 seconds => both done on 7GB file,
+    // Therefore, this change should save 20 seconds every 7 GB, or save about 3 seconds every Gigabyte.
+    //let buf_reader = BufReader::with_capacity(chunk_size, file); //test  me!
 
     //have the stream adapt to the values it is given.
-
-    let stream = ReaderStream::new(buf_reader);
-    let body = Body::from_stream(stream);
+    let stream = tokio_util::io::ReaderStream::with_capacity(file, chunk_size); //test me!
+    //let stream = ReaderStream::new(buf_reader); //test me!
+    let body = Body::from_stream(stream); //stay the same
 
     // Guess MIME type (or fallback to binary)
     let mime = mime_guess::from_path(&path).first_or_octet_stream();
