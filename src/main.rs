@@ -34,9 +34,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::{
     fs::{File, OpenOptions},
-    io::{AsyncSeekExt, AsyncWriteExt, BufReader, BufWriter}, // BufReader added for streaming
+    io::{AsyncSeekExt, AsyncWriteExt, BufWriter}, // BufReader added for streaming
 };
-use tokio_util::{bytes, io::ReaderStream};
+use tokio_util::bytes;
 use tower_http::cors::{Any, CorsLayer};
 
 use rust_embed::RustEmbed;
@@ -362,15 +362,15 @@ async fn main() {
     let lan_ip = get_local_ip().unwrap_or_else(|| "unknown".into());
     let port = 8080;
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    println!("\n--Server Layer--");
-    println!(" SolNAS sarting up server");
+    println!("\nWelcome to SolNAS");
+    println!("   SolNAS sarting up server");
     //println!("  Localhost  -> https://localhost:{}/login", port);
     println!(
-        "    Website Connection   -> https://{}:{}/login",
-        lan_ip, port
+        "    Website Connection   -> https://{}:{}/login [CTRL+CLK]",
+        &lan_ip, port
     );
-    println!("       Enter {} into client login (if using app)", &lan_ip);
-    println!("\n--File Size Layer--");
+    println!("       Enter {} into client login ", &lan_ip);
+    println!("\n   Current Server Settings");
 
     //make some pretty values for the user.
     let maxsize = CONFIG.read().unwrap().max_upload_size;
@@ -378,17 +378,20 @@ async fn main() {
     let pretty_max_size = maxsize as f64 / (1024.0 * 1024.0 * 1024.0);
     let pretty_upload_speed = maxspeed as f64 / (1024.0 * 1024.0);
 
-    println!("Max File Size Set To {:.2} GB", pretty_max_size);
+    println!("   [Max File Size Set To {:.2} GB]", pretty_max_size);
 
     if pretty_upload_speed <= 0.0 {
-        println!("   Upload Speed is set to Infinite");
+        println!("   [Upload Speed is set to Infinite]");
     } else {
-        println!("   Upload Speed : {:.2}MB/s", pretty_upload_speed);
+        println!("   [Upload Speed : {:.2}MB/s]", pretty_upload_speed);
     }
-    println!("     Use config.ini to change these values");
+    //look cute
+    println!("     Values can be changed using Client app\n");
     println!("     Shut down using ctrl+C");
-    println!("--Begin Feedback Layer--\n");
-    //new stuff:
+    println!("===========================");
+    println!("Active Processes");
+    println!("===========================\n");
+
     let handle = axum_server::Handle::new();
     let shutdown_handle = handle.clone();
 
@@ -559,7 +562,7 @@ async fn api_upload(headers: HeaderMap, mut multipart: Multipart) -> impl IntoRe
     }
 
     let mut global_written: u64 = 0; //this is to keep everything normal
-    println!("\nBeginning Upload Now...\n");
+    println!("   Began upload at {}", get_time());
 
     //track all the names of the successful files
     let mut uploaded_files = Vec::new();
@@ -762,7 +765,7 @@ async fn api_list_files(Query(query): Query<ListQuery>) -> Response {
 
 #[derive(Deserialize)]
 pub struct DownloadQuery {
-    preview: Option<bool>,
+    _preview: Option<bool>,
 }
 ///Handles downloads from the program into the browser downloader.
 ///
