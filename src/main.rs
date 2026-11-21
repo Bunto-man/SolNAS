@@ -692,10 +692,10 @@ async fn api_upload(headers: HeaderMap, mut multipart: Multipart) -> impl IntoRe
 }
 
 async fn api_list_files(Query(query): Query<ListQuery>) -> Response {
-    // 1. Get the requested path, or default to the root if they didn't provide one
+    //Get the requested path, or default to the root if they didn't provide one
     let target_subpath = query.path.unwrap_or_else(|| "".to_string());
 
-    // 2. Sanitize it using the helper we built earlier
+    //Sanitize it using the helper built earlier
     let safe_path = match resolve_safe_path(&target_subpath) {
         Ok(path) => path,
         Err(e) => {

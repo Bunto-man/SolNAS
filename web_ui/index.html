@@ -29,14 +29,14 @@ body {
 }
 .hidden { display: none !important; }
 input[type="password"], input[type="file"] {
-    width: 100%; padding: 12px; margin: 10px 0; 
-    border: 1px solid #444; border-radius: 8px; 
+    width: 100%; padding: 12px; margin: 10px 0;
+    border: 1px solid #444; border-radius: 8px;
     background-color: #333; color: white;
     box-sizing: border-box; font-size: 16px;
 }
 button {
-    background-color: var(--primary); color: white; border: none; 
-    padding: 12px 20px; border-radius: 8px; width: 100%; 
+    background-color: var(--primary); color: white; border: none;
+    padding: 12px 20px; border-radius: 8px; width: 100%;
     font-size: 16px; cursor: pointer; margin-bottom: 20px;
     transition: background-color 0.2s ease, transform 0.1s ease;
 }
@@ -44,35 +44,75 @@ button:hover { background-color: var(--primary-hover); }
 button:active { transform: scale(0.98); }
 
 .file-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); /* Slightly larger base */
-    gap: 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }
+
 .file-card {
-    background: var(--card-bg); padding: 15px; border-radius: 12px; 
-    box-shadow: 0 4px 6px rgba(0,0,0,0.2); text-align: center; 
-    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    background: var(--card-bg);
+    padding: 10px 15px;
+    border-radius: 10px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+    text-align: left;
     transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
-.file-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 8px 12px rgba(0,0,0,0.3);
-}
-.file-card img { 
-    width: 100%; height: 100px; object-fit: cover; 
-    border-radius: 8px; margin-bottom: 10px; 
-}
-.file-name {
-    font-weight: bold; font-size: 14px;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; /* Clean truncation */
-    margin-bottom: 5px;
-}
-.file-size { font-size: 12px; color: var(--text-muted); }
-.download-btn { background-color: #7700ff; margin-top: 10px; padding: 8px; font-size: 14px; }
-.open-btn { background-color: var(--primary); margin-top: 10px; padding: 8px; font-size: 14px; }
 
-.nav-bar { 
-    display: flex; align-items: center; margin-bottom: 20px; 
+.file-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 10px rgba(0,0,0,0.3);
+}
+
+.file-card img {
+    width: 48px;
+    height: 48px;
+    object-fit: cover;
+    border-radius: 6px;
+    margin-bottom: 0;
+    flex-shrink: 0;
+}
+
+.file-icon {
+    font-size: 28px;
+    width: 48px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.file-info {
+    flex: 1;
+    min-width: 0; /* Required so long filenames truncate with '...' inside flexbox */
+}
+
+.file-name {
+    font-weight: bold;
+    font-size: 15px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 2px;
+}
+
+.file-size {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.download-btn, .open-btn {
+    width: auto;
+    margin: 0;
+    padding: 8px 16px;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.download-btn { background-color: #7700ff; }
+.open-btn { background-color: var(--primary); }
+.nav-bar {
+    display: flex; align-items: center; margin-bottom: 20px;
     background: var(--card-bg); padding: 10px 15px; border-radius: 8px;
 }
 .nav-bar button { width: auto; margin: 0 15px 0 0; padding: 8px 15px; background-color: #555;}
@@ -134,7 +174,7 @@ button:active { transform: scale(0.98); }
         if (entry.isIntersecting) {
             const img = entry.target;
             const fullFilePath = img.getAttribute('data-filepath');
-            
+
             fetch(`/api/download/${fullFilePath}?preview=true`, {
                 headers: { 'Authorization': 'Bearer ' + token }
             })
@@ -145,7 +185,7 @@ button:active { transform: scale(0.98); }
                 img.src = url;
             })
             .catch(e => console.error("Failed to load preview", e));
-            
+
             // Stop observing this image once we start fetching it
             observer.unobserve(img);
         }
@@ -232,45 +272,42 @@ button:active { transform: scale(0.98); }
             fileList.innerHTML = '';
 
             data.files.forEach(file => {
-                const card = document.createElement('div');
-                card.className = 'file-card';
+                            const card = document.createElement('div');
+                            card.className = 'file-card';
 
-                if (file.is_dir) {
-                    card.innerHTML = `
-                        <div style="font-size: 40px; margin-bottom: 10px;">📁</div>
-                        <div class="file-name" title="${file.name}">${file.name}</div>
-                        <div class="file-size">Folder</div>
-                        <button class="open-btn" onclick="openFolder('${file.name}')">Open</button>
-                    `;
-                } else {
-                    const isImage = file.name.match(/\.(jpg|jpeg|png|gif)$/i);
-                    const fullFilePath = currentPath ? `${currentPath}/${file.name}` : file.name;
+                            if (file.is_dir) {
+                                card.innerHTML = `
+                                    <div class="file-icon">📁</div>
+                                    <div class="file-info">
+                                        <div class="file-name" title="${file.name}">${file.name}</div>
+                                        <div class="file-size">Folder</div>
+                                    </div>
+                                    <button class="open-btn" onclick="openFolder('${file.name}')">Open</button>
+                                `;
+                                fileList.appendChild(card);
+                            } else {
+                                const isImage = file.name.match(/\.(jpg|jpeg|png|gif|webp)$/i);
+                                const fullFilePath = currentPath ? `${currentPath}/${file.name}` : file.name;
 
-                    const checkboxHtml = `
-                        <div style="text-align: left; margin-bottom: 5px;">
-                            <input type="checkbox" class="file-select-cb" value="${file.name}" onchange="toggleSelection(this)">
-                        </div>
-                    `;
+                                card.innerHTML = `
+                                    <input type="checkbox" class="file-select-cb" value="${file.name}" onchange="toggleSelection(this)">
+                                    ${isImage ? `<img class="lazy-preview" data-filepath="${fullFilePath}" src="" alt="loading..."/>` : '<div class="file-icon">📄</div>'}
+                                    <div class="file-info">
+                                        <div class="file-name" title="${file.name}">${file.name}</div>
+                                        <div class="file-size">${formatBytes(file.size)}</div>
+                                    </div>
+                                    <button class="download-btn" onclick="downloadFile('${fullFilePath}')">Download</button>
+                                `;
 
-                    // We embed the file path into 'data-filepath' for the Observer to use
-                    card.innerHTML = `
-                        ${checkboxHtml}
-                        ${isImage ? `<img class="lazy-preview" data-filepath="${fullFilePath}" src="" alt="loading..."/>` : '<div style="font-size: 40px; margin-bottom: 10px;">📄</div>'}
-                        <div class="file-name" title="${file.name}">${file.name}</div>
-                        <div class="file-size">${formatBytes(file.size)}</div>
-                        <button class="download-btn" onclick="downloadFile('${fullFilePath}')">Download</button>
-                    `;
+                                fileList.appendChild(card);
 
-                    fileList.appendChild(card);
-
-                    // Tell the observer to watch this specific image
-                    if (isImage) {
-                        const imgElement = card.querySelector('.lazy-preview');
-                        imageObserver.observe(imgElement);
-                    }
-                }
-                fileList.appendChild(card);
-            });
+                                // Tell the observer to watch this specific image
+                                if (isImage) {
+                                    const imgElement = card.querySelector('.lazy-preview');
+                                    imageObserver.observe(imgElement);
+                                }
+                            } fileList.appendChild(card);
+                        });
         } catch (e) { fileList.innerHTML = '<p style="color:red;">Failed to load files.</p>'; }
     }
 
