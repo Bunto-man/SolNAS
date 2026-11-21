@@ -10,7 +10,7 @@ mime_guess = { version = "2.0.5", default-features = false}
 once_cell = { version ="1.21.3", default-features = false}
 serde = { version = "1.0.226", default-features= false, features = ["derive"] }
 serde_json = { version = "1.0.145", default-features = false}
-tokio = { version = "1.47.1", default-features = false, features = ["signal","process","rt-multi-thread" ]}
+tokio = { version = "1.47.1", default-features = false, features = ["signal","process","rt-multi-thread", "sync" ]}
 tokio-util = { version = "0.7", default-features=false, features = ["compat", "io"] }
 tower = {version = "0.5.2", default-features = false}
 tower-cookies = { version = "0.11.0", default-features = false}

@@ -13,7 +13,7 @@ use std::{
     io::{self, Cursor, SeekFrom, Write},
     net::{SocketAddr, UdpSocket},
     path::{Component, Path, PathBuf},
-    sync::RwLock,
+    sync::{Arc, RwLock},
     time::{Instant, SystemTime, UNIX_EPOCH},
 }; //standard
 
@@ -34,7 +34,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::{
     fs::{File, OpenOptions},
-    io::{AsyncSeekExt, AsyncWriteExt, BufWriter}, // BufReader added for streaming
+    io::{AsyncSeekExt, AsyncWriteExt, BufWriter},
+    sync::Semaphore, // BufReader added for streaming
 };
 use tokio_util::bytes;
 use tower_http::cors::{Any, CorsLayer};
@@ -47,6 +48,7 @@ static GLOBAL: MiMalloc = MiMalloc; //I really hate it, but the app does likely 
 while mimalloc is terrible for windows, bumping the memory up to 55MB, it does seem to clear memory during runtime.
 Let's see for linux though.
 */
+static THUMBNAIL_SEMAPHORE: Lazy<Arc<Semaphore>> = Lazy::new(|| Arc::new(Semaphore::new(4)));
 //-----------------------------------------------------------------------------------------------
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -828,15 +830,18 @@ async fn api_download(
         .unwrap_or("")
         .to_lowercase();
     let is_image = matches!(extension.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp");
-
+    let is_video = matches!(extension.as_str(), "mp4" | "mov" | "mkv" | "avi" | "webm"); //now includes videos.
     if is_preview && is_image {
+        // Wait in line until one of the 4 permits is free
+        let _permit = THUMBNAIL_SEMAPHORE.acquire().await.unwrap();
+
         // Read the raw file bytes from the NAS disk
         if let Ok(bytes) = tokio::fs::read(&full_path).await {
             // Offload the heavy decoding and resizing to a blocking thread so the server doesn't freeze
             let thumbnail_result = tokio::task::spawn_blocking(move || {
                 let img = image::load_from_memory(&bytes).map_err(|_| "Failed to load image")?;
 
-                // Shrink it down dramatically[cite: 1]
+                // Shrink it down dramatically
                 let thumb = img.thumbnail(256, 256);
 
                 // Encode the new thumbnail back to JPEG bytes in memory
@@ -854,6 +859,41 @@ async fn api_download(
                 let mut headers = HeaderMap::new();
                 headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("image/jpeg"));
                 return (headers, Body::from(thumb_bytes)).into_response();
+            }
+        }
+        // `_permit` is automatically dropped here (or on `return`), freeing the slot
+    }
+    if is_preview && is_video {
+        // Wait for a semaphore permit so we don't spawn 50 FFmpeg processes at once
+        let _permit = THUMBNAIL_SEMAPHORE.acquire().await.unwrap();
+
+        let output = tokio::process::Command::new("ffmpeg")
+            .args([
+                "-ss", "00:00:01", // Fast-seek to 1 second in (avoids black intro frames)
+                "-i",
+            ])
+            .arg(&full_path) // Pass PathBuf directly (handles spaces/special chars safely)
+            .args([
+                "-frames:v",
+                "1", // Grab exactly 1 frame
+                "-vf",
+                "scale=256:-1", // Resize to 256px wide, preserving aspect ratio
+                "-q:v",
+                "5", // Lightweight JPEG quality (2 = highest, 31 = lowest)
+                "-f",
+                "image2pipe", // Output raw image stream...
+                "-vcodec",
+                "mjpeg",  // ...encoded as JPEG...
+                "pipe:1", // ...directly to stdout (no temp files on disk)
+            ])
+            .output()
+            .await;
+
+        if let Ok(out) = output {
+            if out.status.success() && !out.stdout.is_empty() {
+                let mut headers = HeaderMap::new();
+                headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("image/jpeg"));
+                return (headers, Body::from(out.stdout)).into_response();
             }
         }
     }

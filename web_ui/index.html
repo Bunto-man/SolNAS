@@ -317,13 +317,13 @@ button:active { transform: scale(0.98); }
                     `;
                     fileList.appendChild(card);
                 } else {
-                    const isImage = file.name.match(/\.(jpg|jpeg|png|gif|webp)$/i);
+                   const isPreviewable = file.name.match(/\.(jpg|jpeg|png|gif|webp|mp4|mov|mkv|avi|webm)$/i);
                     const fullFilePath = currentPath ? `${currentPath}/${file.name}` : file.name;
                     const isChecked = selectedFiles.has(file.name) ? 'checked' : '';
 
                     card.innerHTML = `
                         <input type="checkbox" class="file-select-cb" value="${file.name}" ${isChecked} onchange="toggleSelection(this)">
-                        ${isImage ? `<img class="lazy-preview" data-filepath="${fullFilePath}" src="" alt="loading..."/>` : '<div class="file-icon">📄</div>'}
+                        ${isPreviewable? `<img class="lazy-preview" data-filepath="${fullFilePath}" src="" alt="loading..."/>` : '<div class="file-icon">📄</div>'}
                         <div class="file-info">
                             <div class="file-name" title="${file.name}">${file.name}</div>
                             <div class="file-size">${formatBytes(file.size)}</div>
@@ -334,7 +334,7 @@ button:active { transform: scale(0.98); }
                     fileList.appendChild(card);
 
                     // Tell the observer to watch this specific image
-                    if (isImage) {
+                    if (isPreviewable) {
                         const imgElement = card.querySelector('.lazy-preview');
                         imageObserver.observe(imgElement);
                     }
