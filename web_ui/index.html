@@ -157,6 +157,12 @@ button:active { transform: scale(0.98); }
         <div class="nav-bar" id="nav-bar">
             <button onclick="goUp()" id="back-btn"> ⬅️ Back</button>
             <span class="nav-path" id="current-path-display">/</span>
+            <select id="sort-select" onchange="renderFiles()" style="margin-left: auto; padding: 6px 10px; border-radius: 6px; background: #333; color: white; border: 1px solid #555;">
+                <option value="newest">Newest First</option>
+                <option value="oldest">Oldest First</option>
+                <option value="name">Name (A–Z)</option>
+                <option value="size">Size (Largest)</option>
+            </select>
         </div>
 
         <div class="file-grid" id="file-list"></div>
@@ -168,6 +174,7 @@ button:active { transform: scale(0.98); }
     let token = localStorage.getItem('nas_token');
     let currentPath = ""; // Tracks where we are in the NAS
     let activeBlobUrls = []; //brand new
+    let currentFiles = []; //for file reordering
 
     const imageObserver = new IntersectionObserver((entries, observer) => {
     entries.forEach(entry => {
@@ -193,6 +200,8 @@ button:active { transform: scale(0.98); }
 }, { rootMargin: "200px" }); // Start loading 200px before it enters the screen
 
     if (token) showDashboard();
+
+
 
     function formatBytes(bytes) {
         if (bytes === 0) return '0 Bytes';
@@ -249,67 +258,89 @@ button:active { transform: scale(0.98); }
 
     // --- File Loading ---
     async function loadFiles() {
-        updateNavBar();
+            updateNavBar();
 
-        // Reset selections when changing folders
-        selectedFiles.clear();
-        updateBatchButton();
+            // Reset selections when changing folders
+            selectedFiles.clear();
+            updateBatchButton();
 
-        const fileList = document.getElementById('file-list');
+            const fileList = document.getElementById('file-list');
+            fileList.innerHTML = '<p>Loading files...</p>';
 
-        activeBlobUrls.forEach(url => URL.revokeObjectURL(url)); //this lets us destroy the RAM
-        activeBlobUrls = [];
+            try {
+                let url = '/api/files';
+                if (currentPath !== "") url += '?path=' + encodeURIComponent(currentPath);
 
-        fileList.innerHTML = '<p>Loading files...</p>';
+                const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
+                if (res.status === 401) return logout();
+                const data = await res.json();
 
-        try {
-            let url = '/api/files';
-            if (currentPath !== "") url += '?path=' + encodeURIComponent(currentPath);
+                currentFiles = data.files; // Save the fetched files for sorting
+                renderFiles();
+            } catch (e) {
+                console.error(e);
+                fileList.innerHTML = '<p style="color:red;">Failed to load files.</p>';
+            }
+        }
 
-            const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
-            if (res.status === 401) return logout();
-            const data = await res.json();
+        // Keep this OUTSIDE of loadFiles() so the sort dropdown can call it
+        function renderFiles() {
+            const fileList = document.getElementById('file-list');
+            const sortSelect = document.getElementById('sort-select');
+            const sortMode = sortSelect ? sortSelect.value : 'newest';
+
+            // Revoke old blob URLs before re-rendering
+            activeBlobUrls.forEach(url => URL.revokeObjectURL(url));
+            activeBlobUrls = [];
             fileList.innerHTML = '';
 
-            data.files.forEach(file => {
-                            const card = document.createElement('div');
-                            card.className = 'file-card';
+            const sorted = [...currentFiles].sort((a, b) => {
+                if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1; // Folders first
+                if (sortMode === 'newest') return (b.modified || 0) - (a.modified || 0);
+                if (sortMode === 'oldest') return (a.modified || 0) - (b.modified || 0);
+                if (sortMode === 'size') return b.size - a.size;
+                return a.name.localeCompare(b.name);
+            });
 
-                            if (file.is_dir) {
-                                card.innerHTML = `
-                                    <div class="file-icon">📁</div>
-                                    <div class="file-info">
-                                        <div class="file-name" title="${file.name}">${file.name}</div>
-                                        <div class="file-size">Folder</div>
-                                    </div>
-                                    <button class="open-btn" onclick="openFolder('${file.name}')">Open</button>
-                                `;
-                                fileList.appendChild(card);
-                            } else {
-                                const isImage = file.name.match(/\.(jpg|jpeg|png|gif|webp)$/i);
-                                const fullFilePath = currentPath ? `${currentPath}/${file.name}` : file.name;
+            sorted.forEach(file => {
+                const card = document.createElement('div');
+                card.className = 'file-card';
 
-                                card.innerHTML = `
-                                    <input type="checkbox" class="file-select-cb" value="${file.name}" onchange="toggleSelection(this)">
-                                    ${isImage ? `<img class="lazy-preview" data-filepath="${fullFilePath}" src="" alt="loading..."/>` : '<div class="file-icon">📄</div>'}
-                                    <div class="file-info">
-                                        <div class="file-name" title="${file.name}">${file.name}</div>
-                                        <div class="file-size">${formatBytes(file.size)}</div>
-                                    </div>
-                                    <button class="download-btn" onclick="downloadFile('${fullFilePath}')">Download</button>
-                                `;
+                if (file.is_dir) {
+                    card.innerHTML = `
+                        <div class="file-icon">📁</div>
+                        <div class="file-info">
+                            <div class="file-name" title="${file.name}">${file.name}</div>
+                            <div class="file-size">Folder</div>
+                        </div>
+                        <button class="open-btn" onclick="openFolder('${file.name}')">Open</button>
+                    `;
+                    fileList.appendChild(card);
+                } else {
+                    const isImage = file.name.match(/\.(jpg|jpeg|png|gif|webp)$/i);
+                    const fullFilePath = currentPath ? `${currentPath}/${file.name}` : file.name;
+                    const isChecked = selectedFiles.has(file.name) ? 'checked' : '';
 
-                                fileList.appendChild(card);
+                    card.innerHTML = `
+                        <input type="checkbox" class="file-select-cb" value="${file.name}" ${isChecked} onchange="toggleSelection(this)">
+                        ${isImage ? `<img class="lazy-preview" data-filepath="${fullFilePath}" src="" alt="loading..."/>` : '<div class="file-icon">📄</div>'}
+                        <div class="file-info">
+                            <div class="file-name" title="${file.name}">${file.name}</div>
+                            <div class="file-size">${formatBytes(file.size)}</div>
+                        </div>
+                        <button class="download-btn" onclick="downloadFile('${fullFilePath}')">Download</button>
+                    `;
 
-                                // Tell the observer to watch this specific image
-                                if (isImage) {
-                                    const imgElement = card.querySelector('.lazy-preview');
-                                    imageObserver.observe(imgElement);
-                                }
-                            } fileList.appendChild(card);
-                        });
-        } catch (e) { fileList.innerHTML = '<p style="color:red;">Failed to load files.</p>'; }
-    }
+                    fileList.appendChild(card);
+
+                    // Tell the observer to watch this specific image
+                    if (isImage) {
+                        const imgElement = card.querySelector('.lazy-preview');
+                        imageObserver.observe(imgElement);
+                    }
+                }
+            });
+        }
 
     // async function loadSecureImagePreview(fullFilePath, elementId) {
     //     try {

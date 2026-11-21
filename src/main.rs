@@ -77,6 +77,7 @@ struct FileInfo {
     name: String,
     size: u64,
     is_dir: bool,
+    modified: u64,
 }
 
 #[derive(RustEmbed)]
@@ -741,10 +742,19 @@ async fn api_list_files(Query(query): Query<ListQuery>) -> Response {
                 // so we just report 0 for folders to save server processing power.
                 let size = if is_directory { 0 } else { metadata.len() };
 
+                // Extract the last-modified timestamp in Unix seconds
+                let modified = metadata
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+
                 files.push(FileInfo {
                     name: name.to_string(),
                     size,
                     is_dir: is_directory,
+                    modified,
                 });
             }
         }
