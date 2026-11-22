@@ -66,6 +66,9 @@ pub async fn api_login(
 }
 
 ///### Demands to see authentication cookies
+///
+/// Should be pretty simple
+/// The JWT key is dynamically loaded to memory, so the password can't likely be found in the RAM.
 pub async fn api_require_auth(
     req: Request,
     next: Next,
