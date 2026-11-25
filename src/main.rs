@@ -258,7 +258,7 @@ fn ensure_password() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("!--------------------------------------------------!");
     println!("First time setup: No password found.");
-    println!("Please enter a password for rShare: ");
+    println!("Please enter a password for SolNAS: ");
     println!("?--------------------------------------------------?\n");
     io::stdout().flush()?; // Ensure the prompt prints immediately
 
