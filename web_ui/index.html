@@ -151,6 +151,9 @@ button:active { transform: scale(0.98); }
             <h3>Upload to Current Folder</h3>
             <input type="file" id="file-input" multiple>
             <button onclick="uploadFiles()">Upload</button>
+            <button id="clear-queue-btn" class="hidden" onclick="clearUploadQueue()" style="background-color: #6c757d;">
+                Clear Queue
+            </button>
             <p id="upload-status"></p>
         </div>
 
@@ -175,6 +178,8 @@ button:active { transform: scale(0.98); }
     let currentPath = ""; // Tracks where we are in the NAS
     let activeBlobUrls = []; //brand new
     let currentFiles = []; //for file reordering
+    let UploadQueue = [];//for file buffering:
+    let isUploading = false;//for file buffering:
 
     const imageObserver = new IntersectionObserver((entries, observer) => {
     entries.forEach(entry => {
@@ -374,28 +379,101 @@ button:active { transform: scale(0.98); }
     async function uploadFiles() {
         const input = document.getElementById('file-input');
         const status = document.getElementById('upload-status');
-        if (input.files.length === 0) return status.innerText = "Please select files first.";
-
-        const formData = new FormData();
-        for (let i = 0; i < input.files.length; i++) {
-            const file = input.files[i];
-            const targetPath = currentPath ? `${currentPath}/${file.name}` : file.name;
-            formData.append('files', file, targetPath);
+        if (input.files.length === 0){
+          if(!isUploading) status.innerText = "Please select files first.";
+          return;
         }
 
-        status.innerText = "Uploading... please wait.";
+        //const formData = new FormData();
+        for (let i = 0; i < input.files.length; i++) {
+          const file = input.files[i];
+          UploadQueue.push({
+            file: input.files[i],
+            targetPath: currentPath ? `${currentPath}/${file.name}` : file.name
+          });
 
-        try {
-            const res = await fetch('/api/upload', {
-                method: 'POST', headers: { 'Authorization': 'Bearer ' + token }, body: formData
-            });
-            if (res.ok) {
-                status.innerText = "Upload complete!";
-                input.value = '';
-                loadFiles();
-            } else { status.innerText = "Upload failed."; }
-        } catch (e) { status.innerText = "Network error."; }
-    }
+            //formData.append('files', file, targetPath);
+        }
+        input.value = '';
+                updateQueueUI();
+
+                if (!isUploading) {
+                    processUploadQueue();
+                }
+            }
+
+    async function processUploadQueue() {
+            if (isUploading) return;
+            isUploading = true;
+
+            const status = document.getElementById('upload-status');
+            let failedCount = 0;
+
+            while (UploadQueue.length > 0) {
+                const job = UploadQueue.shift(); // Pop the oldest file (FIFO)
+                updateQueueUI();
+
+                const remaining = UploadQueue.length;
+                status.innerText = remaining > 0
+                    ? `Uploading '${job.file.name}' (${remaining} more in queue)...`
+                    : `Uploading '${job.file.name}'...`;
+
+                const formData = new FormData();
+                const targetPath = job.targetFolder
+                    ? `${job.targetFolder}/${job.file.name}`
+                    : job.file.name;
+                formData.append('files', job.file, targetPath);
+
+                try {
+                    const res = await fetch('/api/upload', {
+                        method: 'POST',
+                        headers: { 'Authorization': 'Bearer ' + token },
+                        body: formData
+                    });
+
+                    if (res.status === 401) {
+                        uploadQueue = [];
+                        isUploading = false;
+                        return logout();
+                    }
+
+                    if (res.ok) {
+                        // Only refresh the list if the user is still viewing the destination folder
+                        if (currentPath === job.targetFolder) {
+                            loadFiles();
+                        }
+                    } else {
+                        failedCount++;
+                        console.error(`Upload failed for ${job.file.name}: HTTP ${res.status}`);
+                    }
+                } catch (e) {
+                    failedCount++;
+                    console.error(`Network error uploading ${job.file.name}:`, e);
+                }
+            }
+
+            isUploading = false;
+            updateQueueUI();
+            status.innerText = failedCount > 0
+                ? `Queue finished with ${failedCount} failed file(s).`
+                : "All uploads complete!";
+        }
+
+        function clearUploadQueue() {
+            UploadQueue = [];
+            updateQueueUI();
+        }
+
+        function updateQueueUI() {
+            const clearBtn = document.getElementById('clear-queue-btn');
+            if (!clearBtn) return;
+            if (UploadQueue.length > 0) {
+                clearBtn.classList.remove('hidden');
+                clearBtn.innerText = `Clear Queue (${UploadQueue.length} pending)`;
+            } else {
+                clearBtn.classList.add('hidden');
+            }
+        }
 
     // --- Batch Selection & Download Logic ---
     function toggleSelection(checkbox) {
@@ -471,6 +549,29 @@ button:active { transform: scale(0.98); }
                 document.querySelectorAll('.file-select-cb').forEach(cb => cb.checked = false);
                 updateBatchButton();
             }
+            setInterval(async () => {
+                // Pause if logged out, tab is in the background, or user is busy selecting/uploading
+                if (!token || document.hidden || isUploading || selectedFiles.size > 0) return;
+
+                try {
+                    let url = '/api/files';
+                    if (currentPath !== "") url += '?path=' + encodeURIComponent(currentPath);
+
+                    const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
+                    if (res.status === 401) return logout();
+                    if (!res.ok) return;
+
+                    const data = await res.json();
+
+                    // Only re-render if the folder contents actually changed
+                    if (JSON.stringify(data.files) !== JSON.stringify(currentFiles)) {
+                        currentFiles = data.files;
+                        renderFiles();
+                    }
+                } catch (_) {
+                    // Silently ignore transient network hiccups during background checks
+                }
+            }, 10000); // Checks every 10 seconds
 </script>
 </body>
 </html>
