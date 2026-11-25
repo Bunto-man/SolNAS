@@ -389,7 +389,7 @@ button:active { transform: scale(0.98); }
           const file = input.files[i];
           UploadQueue.push({
             file: input.files[i],
-            targetPath: currentPath ? `${currentPath}/${file.name}` : file.name
+            targetFolder: currentPath
           });
 
             //formData.append('files', file, targetPath);
