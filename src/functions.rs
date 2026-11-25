@@ -856,15 +856,14 @@ pub async fn api_upload_chunk(mut multipart: Multipart) -> impl IntoResponse {
     (StatusCode::OK, Json(json!({"status": "success"}))).into_response()
 }
 
-//More new stuff
 pub async fn update_config(Json(new_config): Json<AppConfig>) -> impl IntoResponse {
-    // 1. Update the live memory immediately
+    // Update the live memory immediately
     {
         let mut config_lock = CONFIG.write().unwrap();
         *config_lock = new_config.clone();
     }
 
-    // 2. Overwrite the INI file with the new values so they persist on reboot
+    // Overwrite the INI file with the new values so they persist on reboot
     let config_path = "config.ini";
     if let Ok(mut file) = std::fs::File::create(config_path) {
         writeln!(file, "[Settings]").unwrap();
